@@ -1,0 +1,1131 @@
+openapi: 3.0.3
+
+# =====================================================================
+# SODEJA API — MVP contract (Phase 1)
+# SPEC ONLY. No implementation exists. Schemas and paths only.
+#
+# Covers Modules 1, 2 (footprint retrieval), 3, 4, 5, 6, 7, 9, 10,
+# 12 (narrow) and 13 (summary tier). Modules 8 and 11 are Phase 2.
+# =====================================================================
+
+info:
+  title: SODEJA API
+  version: 0.1.0-spec
+  description: |
+    Contract for the "Estudio de Ubicación Comercial" vertical slice.
+
+    Three conventions hold across every response in this document and are not
+    repeated per endpoint:
+
+    1. **No bare numbers.** Every estimated quantity is a `NumericRange` or a
+       `MoneyRange` (`low`/`base`/`high`). Point estimates are not representable.
+    2. **Every value carries provenance.** `usuario`, `referencia_sectorial`, or
+       `estimado`, plus a `Citation` where one exists.
+    3. **Every calculation result carries `engineVersion` and `asOfDate`**, so a
+       stored result is reproducible and a stale one is detectable.
+
+    Errors use RFC 7807 `application/problem+json`.
+
+    ## Tenancy
+
+    Every project belongs to an organization, and one personal organization is
+    created automatically per account. The MVP is **functionally single-tenant**:
+    `orgId` is read-only, and there are deliberately no endpoints for
+    organization management, invitations, roles, or billing. The field exists so
+    the tenancy boundary is exercised from day one rather than retrofitted onto
+    live data later.
+
+    ## External providers
+
+    Infrastructure posture (product decision 2026-07-25): **free and local tiers
+    only**. Map tiles, POI data, object storage, cache, and error tracking are
+    each addressed through a configurable interface selected by environment
+    variable, so a free source can be swapped for a paid equivalent without an
+    API change. No response shape in this document depends on which provider is
+    configured. Anything that would incur a charge requires explicit
+    product-owner approval first.
+
+servers:
+  - url: https://api.sodeja.do/v1
+    description: Production (not yet provisioned)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Projects
+  - name: Geo             # Modules 2, 3
+  - name: Market Study    # Module 1
+  - name: Catalog         # Module 5
+  - name: Analysis        # Modules 4, 6, 7, 9, 10
+  - name: Permits         # Module 12
+  - name: Reports         # Module 13
+  - name: Legal
+
+paths:
+
+  # ---------------------------------------------------------------
+  # Projects
+  # ---------------------------------------------------------------
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List the caller's projects
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ProjectStatus' } }
+        - { name: limit,  in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Project' } }
+                  nextCursor: { type: string, nullable: true }
+    post:
+      tags: [Projects]
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 120 }
+                businessTypeId: { type: integer, nullable: true }
+                reportingCurrency: { $ref: '#/components/schemas/CurrencyCode' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /projects/{projectId}:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    get:
+      tags: [Projects]
+      summary: Get a project with its current analysis state
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectDetail' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [Projects]
+      summary: Update project metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                status: { $ref: '#/components/schemas/ProjectStatus' }
+                businessTypeId: { type: integer }
+                reportingCurrency: { $ref: '#/components/schemas/CurrencyCode' }
+                fxUsdDop: { type: number, description: Pinned per project so a stored projection does not change meaning when the rate moves }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      responses:
+        '204': { description: Deleted }
+
+  # ---------------------------------------------------------------
+  # Geo — Modules 2 and 3
+  # ---------------------------------------------------------------
+  /geo/buildings:
+    get:
+      tags: [Geo]
+      summary: Find building footprints at a tapped point (Module 2/3)
+      description: |
+        Backs tap-to-select. This is a PostGIS `ST_Contains` lookup against
+        ingested open footprint datasets — not model inference. Returns zero
+        results wherever coverage is missing, which is the case the manual
+        polygon-draw fallback exists for.
+
+        Results are **suggestions**. The API will not accept them as an
+        analysis input until confirmed via `PUT /projects/{id}/location`.
+      parameters:
+        - { name: lat, in: query, required: true, schema: { type: number, format: double } }
+        - { name: lon, in: query, required: true, schema: { type: number, format: double } }
+        - name: radiusM
+          in: query
+          schema: { type: integer, default: 25, maximum: 100 }
+          description: Fallback search radius when the point falls inside no footprint
+      responses:
+        '200':
+          description: |
+            Zero or more candidates, plus the data-coverage tier for the area.
+            An empty `candidates` array with tier `insuficiente` means "we have
+            no data here", which the client must render differently from
+            "there is no building here".
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [candidates, coverage]
+                properties:
+                  candidates:
+                    type: array
+                    items: { $ref: '#/components/schemas/BuildingCandidate' }
+                  coverage: { $ref: '#/components/schemas/DataCoverage' }
+        '400': { $ref: '#/components/responses/Problem' }
+
+  /geo/coverage:
+    get:
+      tags: [Geo]
+      summary: Data-coverage tier for a point
+      description: |
+        Lets the client warn before a user invests effort in an area SODEJA
+        cannot analyse. MVP launch areas are Distrito Nacional, Santo Domingo
+        province, and Santiago; everywhere else returns `isLaunchArea: false`.
+      parameters:
+        - { name: lat, in: query, required: true, schema: { type: number } }
+        - { name: lon, in: query, required: true, schema: { type: number } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataCoverage' }
+
+  /projects/{projectId}/location:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    put:
+      tags: [Geo]
+      summary: Set and confirm the project site (Module 3)
+      description: |
+        The confirmation gate. Downstream endpoints (`/capacity`,
+        `/financial-projection`, `/reports`) return `409` until this succeeds.
+
+        `areaSource` records how the area was established. `footprint_dataset`
+        still requires `areaConfirmed: true` — the user must have seen and
+        accepted the number, because reported dataset area error of ±20-40%
+        would otherwise propagate silently into a break-even figure.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [areaSource, areaSqm, areaConfirmed, centroid]
+              properties:
+                centroid: { $ref: '#/components/schemas/Point' }
+                polygon:
+                  $ref: '#/components/schemas/Polygon'
+                  description: Required when areaSource is user_drawn
+                suggestedFootprintId:
+                  type: integer
+                  nullable: true
+                  description: Retained for accuracy telemetry — the suggested-vs-confirmed delta is the only honest basis for a future accuracy claim
+                areaSqm: { type: number, minimum: 1 }
+                areaSource: { $ref: '#/components/schemas/AreaSource' }
+                areaConfirmed:
+                  type: boolean
+                  description: Must be true. Present as an explicit field so the confirmation is auditable rather than implied.
+                addressText: { type: string, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectLocation' }
+        '422':
+          $ref: '#/components/responses/Problem'
+
+  # ---------------------------------------------------------------
+  # Module 1 — Market study
+  # ---------------------------------------------------------------
+  /projects/{projectId}/market-study:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    post:
+      tags: [Market Study]
+      summary: Compute population and competition around the site (Module 1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                radiusM: { type: integer, default: 500, maximum: 5000 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MarketStudy' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /projects/{projectId}/market-study/competitors:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    post:
+      tags: [Market Study]
+      summary: Add a competitor the user observed on the ground
+      description: |
+        A first-class input, not a fallback. Informal businesses are invisible to
+        every dataset available for the DR, so the count from open data is a
+        floor rather than a measurement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, point]
+              properties:
+                name: { type: string }
+                point: { $ref: '#/components/schemas/Point' }
+                category: { type: string, nullable: true }
+      responses:
+        '201':
+          description: Added
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MarketStudy' }
+
+  # ---------------------------------------------------------------
+  # Module 5 — Catalog
+  # ---------------------------------------------------------------
+  /business-types:
+    get:
+      tags: [Catalog]
+      summary: List active business types (Module 5)
+      description: MVP ships 4-6 curated types. Inactive types are not returned.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/BusinessType' } }
+
+  # ---------------------------------------------------------------
+  # Assumptions — the shared input set for Modules 4, 6, 7, 9, 10
+  # ---------------------------------------------------------------
+  /projects/{projectId}/assumptions:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    get:
+      tags: [Analysis]
+      summary: List every assumption driving this project's numbers
+      description: |
+        One canonical assumption set per project, so no two modules can disagree
+        about the same site. This is also what the PDF assumptions appendix reads.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Assumption' } }
+    patch:
+      tags: [Analysis]
+      summary: Override one or more assumptions
+      description: |
+        Overrides are instrumented. A default that users systematically move is
+        evidence the curated benchmark is wrong, and that signal is more valuable
+        than the benchmark itself.
+
+        A value outside the curated plausibility band sets `implausible: true` on
+        the response but is **accepted** — the user may know their market better
+        than the benchmark does. Warn, never block.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assumptions]
+              properties:
+                assumptions:
+                  type: array
+                  items:
+                    type: object
+                    required: [key, valueBase]
+                    properties:
+                      key: { type: string }
+                      valueLow: { type: number }
+                      valueBase: { type: number }
+                      valueHigh: { type: number }
+                      currency: { $ref: '#/components/schemas/CurrencyCode' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Assumption' } }
+                  invalidated:
+                    type: array
+                    items: { type: string }
+                    description: Names of downstream results now stale and needing recomputation
+
+  # ---------------------------------------------------------------
+  # Modules 4, 6, 9, 10, 7
+  # ---------------------------------------------------------------
+  /projects/{projectId}/layout:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    post:
+      tags: [Analysis]
+      summary: Preliminary space layout from typology ratios (Module 4)
+      description: |
+        Parametric ratio templates applied to the confirmed area — **not** derived
+        from imagery. Overhead imagery yields a roof outline, never interior
+        partitions, so no amount of ML would produce this. Ratios are
+        international, not DR-specific, and every zone carries that caveat.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LayoutSuggestion' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /projects/{projectId}/capacity:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    post:
+      tags: [Analysis]
+      summary: Estimate commercial capacity (Module 6)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapacityEstimate' }
+        '409':
+          $ref: '#/components/responses/Problem'
+
+  /projects/{projectId}/fit-out-cost:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    post:
+      tags: [Analysis]
+      summary: Estimate fit-out cost (Module 9)
+      description: |
+        Anchored on a housing construction index with curated business-type
+        uplifts, because no public DR commercial fit-out benchmark was found.
+        Bands are wide by design and `indicativeOnly` is always true in Phase 1.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FitOutEstimate' }
+
+  /projects/{projectId}/operating-cost:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    post:
+      tags: [Analysis]
+      summary: Estimate monthly operating cost (Module 10)
+      description: |
+        Payroll and TSS legs rest on official published figures; rent and
+        utilities are curated ranges. Utilities include generator/inverter cost,
+        which is normal operating reality in the DR rather than an edge case.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpexEstimate' }
+
+  /projects/{projectId}/financial-projection:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    post:
+      tags: [Analysis]
+      summary: Run the financial projection (Module 7)
+      description: |
+        The integration point: requires a confirmed location, a business type,
+        and current capacity, fit-out and opex estimates. Returns `409` with a
+        `missingPrerequisites` list rather than silently computing from defaults.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                horizonMonths: { type: integer, default: 36, maximum: 60 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinancialProjection' }
+        '409': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Analysis]
+      summary: Retrieve the latest stored projection
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinancialProjection' }
+
+  # ---------------------------------------------------------------
+  # Module 12 — Permits
+  # ---------------------------------------------------------------
+  /projects/{projectId}/permits-checklist:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    get:
+      tags: [Permits]
+      summary: Generate the permits checklist (Module 12)
+      description: |
+        **Non-exhaustive by design.** There is no response value meaning
+        "compliant" or "cleared to open": a false negative here could mean a user
+        opens a business and is shut down after fit-out capital is spent.
+
+        Every item carries its agency, its citation, and the date that citation
+        was retrieved. `isExhaustive` is always `false` and the client must
+        render that statement, not hide it in a tooltip.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermitChecklist' }
+    patch:
+      tags: [Permits]
+      summary: Mark items the user has completed
+      description: Records the user's own tracking. SODEJA certifies nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [id, userMarkedDone]
+                    properties:
+                      id: { type: integer }
+                      userMarkedDone: { type: boolean }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermitChecklist' }
+
+  # ---------------------------------------------------------------
+  # Module 13 — Reports
+  # ---------------------------------------------------------------
+  /projects/{projectId}/reports:
+    parameters: [ { $ref: '#/components/parameters/ProjectId' } ]
+    post:
+      tags: [Reports]
+      summary: Request a summary report export (Module 13)
+      description: |
+        Always asynchronous — Chromium rendering never blocks the request path.
+        Returns `202` with a report id.
+
+        Phase 1 produces only the watermarked `resumen_analisis` tier. The
+        bank-facing `plan_negocio` tier is Phase 2 and gated on validation
+        against real DR businesses; requesting it returns `403`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tier: { $ref: '#/components/schemas/ReportTier' }
+                locale: { type: string, default: es-DO }
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /reports/{reportId}:
+    parameters:
+      - { name: reportId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [Reports]
+      summary: Poll report status and retrieve the download URL
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+
+  # ---------------------------------------------------------------
+  # Legal — Ley 172-13 and liability posture
+  # ---------------------------------------------------------------
+  /legal/documents/current:
+    get:
+      tags: [Legal]
+      summary: Current ToS, privacy notice and disclaimer versions
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/LegalDocument' } }
+
+  /legal/acceptances:
+    post:
+      tags: [Legal]
+      summary: Record acceptance of a specific document version
+      description: |
+        Acceptance is per version. The limitation-of-liability text that matters
+        in a dispute is the one in force when the user exported the projection
+        they acted on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalDocumentId]
+              properties:
+                legalDocumentId: { type: integer }
+      responses:
+        '201': { description: Recorded }
+
+  /me/consents:
+    get:
+      tags: [Legal]
+      summary: Current consent state per purpose
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Consent' } }
+    patch:
+      tags: [Legal]
+      summary: Grant or revoke a consent
+      description: |
+        Granular and separately revocable per Ley 172-13. Revoking
+        `precise_location` must leave manual pin placement fully working — the
+        product degrades, it does not lock.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose, granted]
+              properties:
+                purpose: { $ref: '#/components/schemas/ConsentPurpose' }
+                granted: { type: boolean }
+      responses:
+        '200': { description: Updated }
+
+  /me/data-export:
+    post:
+      tags: [Legal]
+      summary: Request a full export of the caller's data
+      responses:
+        '202': { description: Export queued }
+
+  /me:
+    delete:
+      tags: [Legal]
+      summary: Request account and data erasure
+      description: Queued rather than immediate — stored reports in object storage must be removed too.
+      responses:
+        '202': { description: Erasure queued }
+
+# =====================================================================
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT from the configured identity provider (Supabase free tier, or a local
+        equivalent in development). Postgres row-level security is the actual
+        enforcement layer, scoped by both user and organization.
+
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Problem:
+      description: RFC 7807 problem document
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+
+    # --- Primitives -------------------------------------------------
+    CurrencyCode:
+      type: string
+      enum: [DOP, USD]
+      default: DOP
+
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: number }
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+
+    MoneyRange:
+      type: object
+      description: Monetary values are always (amount, currency) and always a band.
+      required: [low, base, high, currency]
+      properties:
+        low: { type: number }
+        base: { type: number }
+        high: { type: number }
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+
+    NumericRange:
+      type: object
+      required: [low, base, high]
+      properties:
+        low: { type: number }
+        base: { type: number }
+        high: { type: number }
+        unit: { type: string }
+
+    Provenance:
+      type: string
+      enum: [usuario, referencia_sectorial, estimado]
+      description: |
+        Rendered next to every figure. `usuario` is authoritative,
+        `referencia_sectorial` has a citation, `estimado` is model-derived and
+        the weakest tier.
+
+    Citation:
+      type: object
+      required: [sourceName, documentTitle, retrievedOn, isVerified]
+      properties:
+        sourceName: { type: string }
+        documentTitle: { type: string }
+        articleRef: { type: string, nullable: true }
+        sourceUrl: { type: string, nullable: true }
+        publishedOn: { type: string, format: date, nullable: true }
+        retrievedOn: { type: string, format: date }
+        isVerified:
+          type: boolean
+          description: False where the underlying figure has an unresolved conflict against primary sources. Unverified content must not be published.
+
+    ConfidenceTier:
+      type: string
+      enum: [alta, media, baja, insuficiente]
+
+    DataCoverage:
+      type: object
+      description: |
+        Exists so that thin coverage reads as "we do not know" rather than
+        "there is no competition here".
+      required: [tier, isLaunchArea]
+      properties:
+        tier: { $ref: '#/components/schemas/ConfidenceTier' }
+        isLaunchArea: { type: boolean }
+        footprintScore: { type: number }
+        poiScore: { type: number }
+        censusScore: { type: number }
+        message: { type: string, nullable: true }
+
+    Point:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+
+    Polygon:
+      type: object
+      description: GeoJSON Polygon, WGS84.
+      required: [type, coordinates]
+      properties:
+        type: { type: string, enum: [Polygon] }
+        coordinates:
+          type: array
+          items:
+            type: array
+            items: { type: array, items: { type: number }, minItems: 2, maxItems: 2 }
+
+    AreaSource:
+      type: string
+      enum: [footprint_dataset, user_drawn, user_entered]
+
+    # --- Calculation envelope --------------------------------------
+    CalcMeta:
+      type: object
+      description: Attached to every calculation result so it is reproducible and staleness is detectable.
+      required: [engineVersion, asOfDate, computedAt]
+      properties:
+        engineVersion: { type: string }
+        asOfDate: { type: string, format: date }
+        computedAt: { type: string, format: date-time }
+        rulePackVersions:
+          type: array
+          items: { type: string }
+        isStale:
+          type: boolean
+          description: True when an assumption changed after this result was computed.
+
+    # --- Domain -----------------------------------------------------
+    ProjectStatus: { type: string, enum: [draft, complete, archived] }
+
+    Project:
+      type: object
+      required: [id, name, status, reportingCurrency]
+      properties:
+        id: { type: string, format: uuid }
+        orgId:
+          type: string
+          format: uuid
+          readOnly: true
+          description: |
+            The owning organization. Read-only and assigned automatically to the
+            caller's personal organization. No organization-management endpoints
+            exist in the MVP.
+        name: { type: string }
+        status: { $ref: '#/components/schemas/ProjectStatus' }
+        businessTypeId: { type: integer, nullable: true }
+        reportingCurrency: { $ref: '#/components/schemas/CurrencyCode' }
+        fxUsdDop: { type: number, nullable: true }
+        fxRateAsOf: { type: string, format: date, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ProjectDetail:
+      allOf:
+        - $ref: '#/components/schemas/Project'
+        - type: object
+          properties:
+            location: { $ref: '#/components/schemas/ProjectLocation' }
+            completeness:
+              type: object
+              description: Drives the progress rail in the UI and the 409 prerequisite lists.
+              properties:
+                hasConfirmedLocation: { type: boolean }
+                hasBusinessType: { type: boolean }
+                hasCapacity: { type: boolean }
+                hasFitOut: { type: boolean }
+                hasOpex: { type: boolean }
+                hasProjection: { type: boolean }
+                canExportReport: { type: boolean }
+
+    ProjectLocation:
+      type: object
+      required: [centroid, areaSource, areaConfirmed]
+      properties:
+        centroid: { $ref: '#/components/schemas/Point' }
+        polygon: { $ref: '#/components/schemas/Polygon' }
+        addressText: { type: string, nullable: true }
+        areaSqm: { type: number, nullable: true }
+        areaSource: { $ref: '#/components/schemas/AreaSource' }
+        areaConfirmed: { type: boolean }
+        suggestedAreaSqm:
+          type: number
+          nullable: true
+          description: The dataset suggestion, retained even after the user overrides it.
+        coverage: { $ref: '#/components/schemas/DataCoverage' }
+
+    BuildingCandidate:
+      type: object
+      description: A suggestion. Never an analysis input until confirmed.
+      required: [id, areaSqm, source, sourceVintage]
+      properties:
+        id: { type: integer }
+        polygon: { $ref: '#/components/schemas/Polygon' }
+        areaSqm: { type: number }
+        detectionConfidence:
+          type: number
+          nullable: true
+          description: Dataset-reported. Distinct from user confirmation — high confidence still requires it.
+        source: { type: string, enum: [open_buildings_v3, ms_globalml, overture, osm] }
+        sourceLicense: { type: string }
+        sourceVintage: { type: string, format: date }
+        attribution:
+          type: string
+          description: Must be rendered on any map view or export showing this geometry.
+
+    BusinessType:
+      type: object
+      required: [id, slug, nameEs]
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        nameEs: { type: string }
+        descriptionEs: { type: string, nullable: true }
+
+    Assumption:
+      type: object
+      required: [key, labelEs, unit, value, provenance, isOverridden]
+      properties:
+        key: { type: string }
+        labelEs: { type: string }
+        unit: { type: string }
+        value: { $ref: '#/components/schemas/NumericRange' }
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+        provenance: { $ref: '#/components/schemas/Provenance' }
+        citation: { $ref: '#/components/schemas/Citation' }
+        isOverridden: { type: boolean }
+        implausible:
+          type: boolean
+          description: Outside the curated plausibility band. A warning, never a rejection.
+        defaultValue:
+          $ref: '#/components/schemas/NumericRange'
+          description: The curated default, so the UI can offer "restore".
+
+    MarketStudy:
+      type: object
+      required: [meta, populationEst, competitorCount, confidence, censusYear]
+      properties:
+        meta: { $ref: '#/components/schemas/CalcMeta' }
+        radiusM: { type: integer }
+        populationEst: { type: integer }
+        competitorCount: { type: integer }
+        competitorsUserAdded: { type: integer }
+        demandIndex:
+          $ref: '#/components/schemas/NumericRange'
+          description: A model output, not a measurement. Labelled as such in the UI.
+        confidence: { $ref: '#/components/schemas/ConfidenceTier' }
+        censusYear:
+          type: integer
+          description: Displayed, not just stored. A 2022 census must not read as current.
+        poiVintage: { type: string, format: date, nullable: true }
+
+    LayoutSuggestion:
+      type: object
+      required: [meta, zones, ratioOriginNote]
+      properties:
+        meta: { $ref: '#/components/schemas/CalcMeta' }
+        totalAreaSqm: { type: number }
+        zones:
+          type: array
+          items:
+            type: object
+            properties:
+              zoneSlug: { type: string }
+              nameEs: { type: string }
+              areaSqm: { $ref: '#/components/schemas/NumericRange' }
+              citation: { $ref: '#/components/schemas/Citation' }
+        ratioOriginNote:
+          type: string
+          description: States that ratios are international rather than DR-specific. Must be rendered.
+
+    CapacityEstimate:
+      type: object
+      required: [meta, seats, staff, dailyCustomers]
+      properties:
+        meta: { $ref: '#/components/schemas/CalcMeta' }
+        seats: { $ref: '#/components/schemas/NumericRange' }
+        staff: { $ref: '#/components/schemas/NumericRange' }
+        dailyCustomers: { $ref: '#/components/schemas/NumericRange' }
+        ratiosUsed:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              value: { $ref: '#/components/schemas/NumericRange' }
+              citation: { $ref: '#/components/schemas/Citation' }
+              provenance: { $ref: '#/components/schemas/Provenance' }
+
+    FitOutEstimate:
+      type: object
+      required: [meta, total, indicativeOnly, indexBaseDate]
+      properties:
+        meta: { $ref: '#/components/schemas/CalcMeta' }
+        total: { $ref: '#/components/schemas/MoneyRange' }
+        byZone:
+          type: array
+          items:
+            type: object
+            properties:
+              zoneSlug: { type: string }
+              cost: { $ref: '#/components/schemas/MoneyRange' }
+        indicativeOnly: { type: boolean, description: Always true in Phase 1. }
+        indexBaseDate:
+          type: string
+          format: date
+          description: Base date of the construction index, so inflation drift is visible.
+
+    OpexEstimate:
+      type: object
+      required: [meta, monthlyTotal, lineItems]
+      properties:
+        meta: { $ref: '#/components/schemas/CalcMeta' }
+        monthlyTotal: { $ref: '#/components/schemas/MoneyRange' }
+        lineItems:
+          type: array
+          items:
+            type: object
+            required: [category, amount, provenance]
+            properties:
+              category:
+                type: string
+                enum: [payroll, tss, rent, utilities, supplies, other]
+              amount: { $ref: '#/components/schemas/MoneyRange' }
+              provenance: { $ref: '#/components/schemas/Provenance' }
+              citation: { $ref: '#/components/schemas/Citation' }
+              note:
+                type: string
+                nullable: true
+                description: e.g. utilities includes generator/inverter cost.
+
+    FinancialProjection:
+      type: object
+      required: [id, meta, currency, monthly, breakEvenMonth]
+      properties:
+        id: { type: string, format: uuid }
+        meta: { $ref: '#/components/schemas/CalcMeta' }
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+        fxUsdDop: { type: number, nullable: true }
+        horizonMonths: { type: integer }
+        monthly:
+          type: array
+          items:
+            type: object
+            properties:
+              month: { type: integer }
+              revenue: { $ref: '#/components/schemas/MoneyRange' }
+              costs: { $ref: '#/components/schemas/MoneyRange' }
+              netCash: { $ref: '#/components/schemas/MoneyRange' }
+        breakEvenMonth:
+          type: object
+          description: |
+            Nullable across all three bounds. A null must render as "no alcanza el
+            punto de equilibrio en el horizonte proyectado" — never as zero.
+          properties:
+            low: { type: integer, nullable: true }
+            base: { type: integer, nullable: true }
+            high: { type: integer, nullable: true }
+        sensitivity:
+          type: array
+          description: Mandatory display. Which inputs move the outcome most.
+          items:
+            type: object
+            properties:
+              assumptionKey: { type: string }
+              impactOnBreakEvenMonths: { type: number }
+
+    PermitChecklist:
+      type: object
+      required: [items, isExhaustive, rulePackVersion, disclaimerEs]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, titleEs, requirement, citation]
+            properties:
+              id: { type: integer }
+              titleEs: { type: string }
+              agencyName: { type: string, nullable: true }
+              requirement:
+                type: string
+                enum: [required, likely_required, not_applicable, unknown]
+                description: There is deliberately no "compliant" or "cleared" value.
+              citation: { $ref: '#/components/schemas/Citation' }
+              userMarkedDone: { type: boolean }
+        isExhaustive:
+          type: boolean
+          description: Always false. Must be rendered as a visible statement, not a tooltip.
+        rulePackVersion: { type: string }
+        jurisdictionName: { type: string }
+        disclaimerEs: { type: string }
+
+    ReportTier: { type: string, enum: [resumen_analisis, plan_negocio] }
+
+    Report:
+      type: object
+      required: [id, tier, status]
+      properties:
+        id: { type: string, format: uuid }
+        tier: { $ref: '#/components/schemas/ReportTier' }
+        status: { type: string, enum: [queued, rendering, ready, failed] }
+        downloadUrl:
+          type: string
+          nullable: true
+          description: |
+            Short-lived signed URL, present only when status is ready. Issued by
+            whichever storage backend is configured (local filesystem, or GCS
+            within the existing credit balance) — the shape does not change.
+        engineVersion: { type: string, nullable: true }
+        disclaimerVersion: { type: string, nullable: true }
+        requestedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+        failureReason: { type: string, nullable: true }
+
+    LegalDocument:
+      type: object
+      required: [id, kind, version, effectiveFrom]
+      properties:
+        id: { type: integer }
+        kind: { type: string, enum: [tos, privacy, disclaimer] }
+        version: { type: string }
+        locale: { type: string }
+        bodyMd: { type: string }
+        effectiveFrom: { type: string, format: date }
+
+    ConsentPurpose:
+      type: string
+      enum: [precise_location, analytics, marketing, cross_border_transfer]
+
+    Consent:
+      type: object
+      required: [purpose, granted, recordedAt]
+      properties:
+        purpose: { $ref: '#/components/schemas/ConsentPurpose' }
+        granted: { type: boolean }
+        recordedAt: { type: string, format: date-time }
+
+    Problem:
+      type: object
+      description: RFC 7807.
+      required: [type, title, status]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        missingPrerequisites:
+          type: array
+          items: { type: string }
+          description: |
+            On 409 from an analysis endpoint. Names what the project still needs
+            (e.g. `location.areaConfirmed`) rather than silently substituting
+            defaults.
