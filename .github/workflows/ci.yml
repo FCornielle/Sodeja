@@ -8,6 +8,25 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # postgis/postgis, not plain postgres: packages/db's tests exercise real
+    # PostGIS extensions and RLS, not a mock — see specs/db/schema.sql and
+    # packages/db/src/schema.test.ts.
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: sodeja
+          POSTGRES_PASSWORD: sodeja_dev
+          POSTGRES_DB: sodeja
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sodeja -d sodeja"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://sodeja:sodeja_dev@localhost:5432/sodeja
     steps:
       - uses: actions/checkout@v4
 
