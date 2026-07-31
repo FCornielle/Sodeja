@@ -1,5 +1,5 @@
 {
-  "name": "@sodeja/schemas",
+  "name": "@sodeja/rules",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,9 +18,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "zod": "^3.25.76"
+    "@sodeja/db": "workspace:*",
+    "@sodeja/schemas": "workspace:*",
+    "json-logic-js": "^2.0.5"
   },
   "devDependencies": {
+    "@types/json-logic-js": "^2.0.8",
     "@types/node": "^26.1.1"
   }
 }
