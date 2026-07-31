@@ -289,3 +289,64 @@ export const OpexEstimateSchema = z.object({
   computedAt: z.string().datetime(),
 });
 export type OpexEstimate = z.infer<typeof OpexEstimateSchema>;
+
+// =========================================================================
+// B-17 — financial projection
+// =========================================================================
+
+/**
+ * `POST /projects/:id/financial-projection` body. Monthly revenue is the
+ * ONE genuinely new input this endpoint introduces, and it is REQUIRED and
+ * explicit: no DR micro-business revenue benchmark exists at any confidence
+ * level (docs/SODEJA_DATA_SOURCES.md table (c), "Micro-business revenue
+ * benchmarks" — "users supply their own, product supplies plausibility
+ * bands only"). It is never derived from `capacity_estimate`'s seat/customer
+ * counts via an invented ticket-price x turnover formula — B-12 deliberately
+ * left `dailyCustomers` null for exactly this reason (no rotación benchmark
+ * exists either); chaining one fabricated assumption onto another would
+ * compound the exact problem this task exists to avoid. Amounts are in the
+ * project's `reporting_currency` — there is no separate currency field here
+ * because the projection always reports in the project's pinned currency
+ * (specs/db/schema.sql `app.project`).
+ *
+ * `horizonMonths` defaults to 36 — a defensible standard horizon for a
+ * break-even analysis; no spec value is given anywhere — and is capped at
+ * 60 (specs/api/openapi.yaml's own cap) to keep `results_json`'s monthly
+ * series a bounded size.
+ */
+export const FinancialProjectionRequestSchema = z
+  .object({
+    monthlyRevenueLow: z.number().nonnegative(),
+    monthlyRevenueBase: z.number().nonnegative(),
+    monthlyRevenueHigh: z.number().nonnegative(),
+    horizonMonths: z.number().int().positive().max(60).default(36),
+  })
+  .refine((v) => v.monthlyRevenueLow <= v.monthlyRevenueBase && v.monthlyRevenueBase <= v.monthlyRevenueHigh, {
+    message: "monthlyRevenueLow must be <= monthlyRevenueBase, and monthlyRevenueBase must be <= monthlyRevenueHigh",
+  });
+export type FinancialProjectionRequest = z.infer<typeof FinancialProjectionRequestSchema>;
+
+export const FinancialProjectionSchema = z.object({
+  id: z.string().uuid(),
+  projectId: z.string().uuid(),
+  engineVersion: z.string().min(1),
+  /** Always `[]` — no permit/tax `content.rule_pack` rows exist yet (B-18/B-11 seeded only parameter values, never a rule pack). */
+  rulePackIds: z.array(z.number().int()),
+  asOfDate: z.string(),
+  fxUsdDop: z.number().nullable(),
+  inputsSnapshot: z.record(z.string(), z.unknown()),
+  resultsJson: z.record(z.string(), z.unknown()),
+  /**
+   * Nullable across all three bounds — a scenario legitimately may not cross
+   * zero within the projection horizon. A `null` here must render as "no
+   * alcanza el punto de equilibrio en el horizonte proyectado", never as
+   * zero and never as the horizon length (specs/db/schema.sql
+   * `app.financial_projection`).
+   */
+  breakevenMonthLow: z.number().int().nullable(),
+  breakevenMonthBase: z.number().int().nullable(),
+  breakevenMonthHigh: z.number().int().nullable(),
+  currency: CurrencySchema,
+  computedAt: z.string().datetime(),
+});
+export type FinancialProjection = z.infer<typeof FinancialProjectionSchema>;

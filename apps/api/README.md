@@ -1,9 +1,9 @@
 # `apps/api` — SODEJA API (Modular Monolith)
 
 **Status: `providers` (B-3), `catalog` (B-11), `projects` (B-11a + B-7a's
-area-confirmation slice), `capacity` (B-12) and `costs` (B-14 fit-out +
-B-15 opex) are implemented. Every other module below is still a
-placeholder.**
+area-confirmation slice), `capacity` (B-12), `costs` (B-14 fit-out +
+B-15 opex) and `finance` (B-17) are implemented. Every other module below is
+still a placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -27,7 +27,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | `layout` | 4 | Not built. Typology ratio templates |
 | `capacity` | 6 | **Implemented (B-12).** `POST /projects/:id/capacity-estimate` — see "B-12 contract" below |
 | `costs` | 9, 10 | **Implemented (B-14 + B-15).** `POST /projects/:id/fitout-estimate`, `POST /projects/:id/opex-estimate` — see "B-14/B-15 contract" below |
-| `finance` | 7 | Not built (B-17). Financial projection; the integration point |
+| `finance` | 7 | **Implemented (B-17).** `POST /projects/:id/financial-projection` — the integration point. See "B-17 contract" below |
 | `rules` | 12 | Not built. Permit checklist evaluation |
 | `reports` | 13 | Not built. Enqueues work; does not render |
 | `legal` | — | Not built. ToS acceptance, Ley 172-13 consent, export/delete |
@@ -221,6 +221,75 @@ optional, uncurated line items — supplied directly or absent; `resultsJson.par
 is `true` whenever either is missing, so the total is legible as incomplete
 rather than presented as a full opex picture.
 
+## B-17 contract — `finance` (`src/finance/`)
+
+**`POST /projects/:id/financial-projection`** — body
+`{ monthlyRevenueLow, monthlyRevenueBase, monthlyRevenueHigh, horizonMonths? }`
+(`FinancialProjectionRequestSchema`, `horizonMonths` defaults `36`, capped at
+`60`). Monthly revenue is the **one genuinely new input** this endpoint
+introduces, and it is **required and explicit** — no DR micro-business
+revenue benchmark exists at any confidence level
+(`docs/SODEJA_DATA_SOURCES.md`), so it is never derived from
+`capacity_estimate`'s seat/customer counts via an invented ticket-price x
+turnover formula (B-12 left `dailyCustomers` null for the same reason).
+Amounts are in the project's `reporting_currency`; no separate currency
+field exists on the request.
+
+**Prerequisites gate (the most important behavior of this endpoint):**
+fetches the project's confirmed area (`requireConfirmedArea`, B-7a) plus the
+latest `capacity_estimate`, `fitout_estimate`, and `opex_estimate`. Every
+missing prerequisite is collected — not just the first one found — into a
+single `409`:
+
+```json
+{
+  "message": "financial projection is blocked: 2 prerequisite(s) missing",
+  "missing": [
+    "missing: fitout_estimate — POST /projects/:id/fitout-estimate first",
+    "missing: opex_estimate — POST /projects/:id/opex-estimate first"
+  ]
+}
+```
+
+Never proceeds with a default/zero value for a missing estimate under any
+circumstance (UX spec Step 7 "Prerequisites missing... never computed from
+silent defaults").
+
+**Computation** (`finance.service.ts`, all via `@sodeja/calc`): fit-out/opex
+amounts are converted onto the project's `reporting_currency` first (via
+`fx_usd_dop`, `409` if a conversion is needed but no rate is pinned — no
+update endpoint sets this yet in the MVP slice). Month 0 is the fit-out
+total as a one-time capex outlay (`-fitoutTotal`); months 1..horizon add a
+constant `monthlyNet = revenue - opex` to the running cumulative cash.
+Subtracting a cost range from a benefit range inverts the cost's
+pessimistic/optimistic bound labels before combining (`subtractCostRange`) —
+`Range<Money>.pessimistic`/`.optimistic` are structurally low/high, not
+"good/bad for the business", exactly the same reasoning `capacity.service.ts`
+applies to `seats = area / ratio`.
+
+**Break-even** is computed per scenario, and — subtly — the bound direction
+INVERTS again relative to the cash-amount direction: a lower break-even
+month is the *better* outcome, and that comes from the cash series'
+OPTIMISTIC trajectory (high revenue, low costs). So
+`breakevenMonthLow` reads the series' `.optimistic` bound and
+`breakevenMonthHigh` reads its `.pessimistic` bound. Any bound that never
+crosses zero within the horizon is `null` — never `0`, never the horizon
+length.
+
+**Sensitivity** (`resultsJson.sensitivity`, mandatory per the UX spec) is a
+real one-at-a-time computation: for each of revenue / opex / fit-out, the
+other two are held at base while that line moves between its own low and
+high bound, and the resulting break-even-month shift is measured. Ranked by
+that shift when every line produced one; falls back to ranking by
+terminal-cumulative-cash delta (always computable, one consistent currency
+unit) when any line never reaches break-even in one of its variants —
+`resultsJson.rankedBy` names which metric was used.
+
+`resultsJson.disclaimer` always carries the non-dismissible "this is a
+projection, not audited, not financial advice" caveat (risk L1).
+`rule_pack_ids` is always `'{}'` — no permit/tax `content.rule_pack` rows
+exist yet (B-18/B-11 seeded only parameter values).
+
 ## Architectural rules
 
 **Cross-module calls go through service interfaces only.** No module reaches
@@ -258,4 +327,4 @@ user sees, it lives in `@sodeja/calc`.
 
 ## Related backlog items
 
-B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, B-14, B-15, and every other module item B-7 through B-20.
+B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, B-14, B-15, B-17, and every other module item B-7 through B-20.
