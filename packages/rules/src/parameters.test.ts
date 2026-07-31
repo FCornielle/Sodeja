@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveParameterValue } from "./parameters.js";
+import { findBestParameterValue, resolveParameterValue } from "./parameters.js";
 import type { BusinessType, CitationRow, Jurisdiction, ParameterTable, ParameterValue } from "./types.js";
 
 const nacional: Jurisdiction = { id: 1, parentId: null, level: "nacional", slug: "nacional", name: "RD" };
@@ -143,5 +143,35 @@ describe("resolveParameterValue", () => {
       expect(result.valueLow).toBeLessThanOrEqual(result.valueBase);
       expect(result.valueBase).toBeLessThanOrEqual(result.valueHigh);
     }
+  });
+});
+
+describe("findBestParameterValue", () => {
+  it("returns the raw parameter_value row, including its id, that resolveParameterValue would pick", () => {
+    const generic = value({ id: 11, valueBase: 100, valueLow: 100, valueHigh: 100 });
+    const specific = value({
+      id: 22,
+      businessTypeId: restaurante.id,
+      valueBase: 200,
+      valueLow: 200,
+      valueHigh: 200,
+    });
+    const best = findBestParameterValue({
+      parameterTable: table,
+      parameterValues: [generic, specific],
+      asOfDate: "2026-07-31",
+      businessType: restaurante,
+    });
+    expect(best?.id).toBe(22);
+    expect(best?.valueBase).toBe(200);
+  });
+
+  it("returns null when nothing is in force as of the given date", () => {
+    const best = findBestParameterValue({
+      parameterTable: table,
+      parameterValues: [value({ validFrom: "2099-01-01" })],
+      asOfDate: "2026-07-31",
+    });
+    expect(best).toBeNull();
   });
 });
