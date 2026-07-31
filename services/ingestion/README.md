@@ -1,8 +1,8 @@
 # `services/ingestion` — Scheduled Data Ingestion Jobs
 
-**Status: B-4 (building footprints) and B-6 (admin geometry + census) are
-implemented.** POI ingestion (B-5) and the derived population-grid /
-data-coverage jobs are not — see "Not yet built" below.
+**Status: B-4 (building footprints), B-6 (admin geometry + census), and B-5
+(POI) are implemented.** The derived population-grid / data-coverage jobs are
+not — see "Not yet built" below.
 
 Carved out of the monolith **from day one**: these jobs are long-running,
 memory-hungry, and must be able to fail without taking the API down. A
@@ -15,6 +15,7 @@ footprint import that OOMs should not return 503 to a user drawing a polygon.
 | Admin geometry | OCHA COD-AB on HDX (`dom_admin_boundaries.geojson.zip`) | `geo.admin_area` | `pnpm ingest:admin-areas` |
 | Census population | ONE Censo 2022 (manual REDATAM extract — see below) | `geo.census_population` | `pnpm ingest:census` |
 | Building footprints | Microsoft GlobalML (primary) + Google Open Buildings V3 (cross-check/gap-fill) | `geo.building_footprint` | `pnpm ingest:footprints` |
+| POI (places) | Overture Places, live bbox query via DuckDB against public S3 Parquet | `geo.poi_place` | `pnpm ingest:poi` |
 
 Each job is a thin CLI wrapper (`src/cli.ts`) around a `run*Job(logger)`
 function in `src/jobs/`, which itself wraps a pure, DB-testable
@@ -46,9 +47,12 @@ upstream dataset's own vintage (MS GlobalML's build date, OCHA's
 
 Google Places content beyond `place_id` and coordinates, and any content
 derived from commercial satellite tiles. Neither applies to this package's
-current scope (footprints, admin geometry, census); the `ephemeral` schema
-exists precisely so that a future POI job (B-5) has somewhere to put
-short-lived, non-redistributable provider content without touching `geo.*`.
+scope (footprints, admin geometry, census, POI) — POI comes from Overture
+Places, not Google, and lands in `geo.poi_place` for exactly that reason
+(`specs/db/schema.sql`'s comment on that table). The `ephemeral` schema
+exists for a per-request Google Places proxy path that the P0-1 spike's
+findings mean B-5 did **not** need to build — see "POI / places (B-5)"
+below.
 
 ## Building footprints (B-4)
 
@@ -146,6 +150,91 @@ verified ONE Censo 2022 figures, but the province/municipio rows are an
 loader is exercisable in CI without a manual extraction. Do not load it
 against a real deployment.
 
+## POI / places (B-5)
+
+The P0-1 spike (`docs/SODEJA_DATA_SOURCES.md`, 2026-07-31) measured — via
+live DuckDB queries against the real, public Overture S3 Parquet release,
+not an estimate — substantial POI density in Santo Domingo and Santiago,
+and recommended B-5 proceed as straightforward warehouse ingestion into
+`geo.poi_place` for those two metro areas, rather than the proxied/ephemeral
+path (`ephemeral.poi_provider_cache` + a B-2a retention reaper). That is
+what this job does; `ephemeral.poi_provider_cache` remains unused by this
+package, kept only as the documented fallback if a future ground-truth pass
+(B-22) shows Overture's urban-core numbers don't hold up.
+
+- **Source: Overture Places**, queried live via the `duckdb` npm package
+  (`src/sources/overturePlaces.ts`) — `spatial` + `httpfs` extensions,
+  `read_parquet('s3://overturemaps-us-west-2/release/<release>/theme=places/type=place/*', ...)`,
+  no AWS credentials configured (DuckDB's httpfs defaults to an anonymous
+  request against the public bucket), no full-dataset download. Same
+  methodology the P0-1 spike used and live-verified; re-verified again
+  during B-5 development. `Connection#stream` (an async-iterable query
+  result) is used instead of `#all` so rows are yielded as they arrive
+  rather than buffering tens of thousands of rows in memory at once.
+- **Geography**: bbox-scoped, not `ST_Contains` against `geo.admin_area` —
+  `geo.admin_area` is not guaranteed to hold real, full-DR OCHA polygons at
+  ingestion time (B-6's own admin-area job requires a live fetch too, and
+  this package's tests only ship a small single-province fixture chain), so
+  a bbox is the self-contained, always-available scoping mechanism. Two
+  bboxes, both wider than the P0-1 spike's tight "urban core" measurement
+  boxes to reasonably cover the full target administrative areas: one
+  spanning Distrito Nacional + the Santo Domingo province ring around it,
+  one spanning the Santiago municipio. Both were live-verified during B-5
+  development (see "Real row counts" below) and are overridable via
+  `OVERTURE_SD_BBOX` / `OVERTURE_SANTIAGO_BBOX`
+  (`"minLon,maxLon,minLat,maxLat"`) without a code change. `admin_area_id`
+  is still resolved per row, the same `ST_Contains` centroid-style join
+  `ingestBuildingFootprints.ts` uses — but as denormalized enrichment only,
+  never as what decides which rows get inserted.
+- **Category mapping**: `categories.primary` → `content.business_type.slug`,
+  via a narrow, rule-based mapping in `src/transform/poiPlaceRow.ts`
+  (`mapOvertureCategory`) — `restaurant`/`*_restaurant` → `restaurante`,
+  `convenience_store` → `colmado`, `grocery_store` → `minimarket`,
+  `hardware_store` → `ferreteria`, `*_salon` → `salon`. Deliberately does
+  **not** force adjacent-but-different categories into a mapping (e.g.
+  `supermarket`, `computer_hardware_company`, `beauty_and_spa` all stay
+  unmapped) — see that function's doc comment for the full reasoning per
+  business type. `raw_category` always keeps Overture's original value,
+  even when `category` is null.
+- **Confidence and category are never filtered at ingestion time.** Per the
+  spike's explicit recommendation, both are staged and written as-is —
+  low-confidence and non-commercial-category (church, landmark, etc.) rows
+  are kept, not silently dropped. An optional, documented,
+  `OVERTURE_MIN_CONFIDENCE` env var (a float in `[0, 1]`) can apply a floor
+  at query time if a future deploy needs to bound row count — unset by
+  default, since 42,906 + 8,421 rows is not large enough to need one.
+- **License**: Overture Places licensing is per-contributor
+  (`docs/SODEJA_DATA_SOURCES.md` table (a): "mixed per source: most
+  contributors CDLA-Permissive-2.0, Foursquare Apache 2.0, AllThePlaces
+  CC0 — all storable/commercial"), and the public Parquet release has no
+  practical per-row contributor/license column. `OVERTURE_PLACES_LICENSE`
+  in `src/transform/poiPlaceRow.ts` is therefore a single summary string
+  naming that mixed-but-all-storable posture, with a code comment
+  explaining why a single field holds a summary rather than a per-row fact.
+- `geo.poi_place.confidence` is a schema addition this job needed —
+  `specs/db/schema.sql` didn't have it (it predates the P0-1 spike's
+  finding that confidence matters). Added via
+  `packages/db/migrations/*_add-poi-place-confidence.sql`
+  (`ALTER TABLE geo.poi_place ADD COLUMN confidence numeric(4,3) CHECK
+  (confidence BETWEEN 0 AND 1)`, nullable), mirroring
+  `geo.building_footprint.confidence` exactly.
+
+### Real row counts (live-verified during B-5 development)
+
+Both bboxes were queried live against the real `2026-07-22.0` Overture
+release while building this job (not a fixture-only claim):
+
+| Area | Bbox | Places |
+|---|---|---|
+| Distrito Nacional + Santo Domingo province | `-70.2,-69.52,18.3,18.7` | 42,906 |
+| Santiago | `-70.8,-70.55,19.35,19.55` | 8,421 |
+
+Combined confidence distribution across both boxes: `>=0.9` 4,437 (12.0%),
+`0.7–0.9` 10,084 (27.2%), `0.5–0.7` 12,421 (33.5%), `<0.5` 10,160 (27.4%) —
+consistent with the P0-1 spike's national-scale finding that a majority of
+DR records sit below 0.7 confidence, which is exactly why `confidence` is
+kept as a first-class column rather than filtered away here.
+
 ## Fixtures — what's real vs. synthetic
 
 | Fixture | Status |
@@ -154,24 +243,25 @@ against a real deployment.
 | `fixtures/ocha-admin{0,2,3,4}-sample.geojson`, `ocha-admin-boundaries-sample.zip` | Real properties/pcodes/names/hierarchy from an actually-downloaded OCHA COD-AB zip (one real parent→child chain: país → Provincia Duarte → Municipio Arenoso → its 3 secciones); geometries for `pais`/`provincia`/`municipio` are simplified to each real polygon's bounding box to keep fixture size small — `seccion` geometries are likewise bbox-simplified for the same reason |
 | `fixtures/open-buildings-sample.csv` | **Synthetic.** Google does not publish a stable bulk-download URL for this job to pull a real sample from (see above) — this fixture matches the real, documented column schema with plausible DR coordinates, not an actual download |
 | `fixtures/census-extract-FIXTURE.csv` | **Mixed.** National totals are real; sub-national split is arbitrary (see above) |
+| `fixtures/overture-places-sample.ndjson` | **Real.** 38 rows pulled live from the real Overture S3 Parquet release inside the Distrito Nacional bbox during B-5 development — real GERS ids, real business names, real confidence scores, spanning every mapped business type plus several deliberately-unmapped categories (`beauty_and_spa`, `church_cathedral`, `landmark_and_historical_building`) and two null-category rows |
 
 Full multi-hundred-MB downloads (MS GlobalML's 18 DR tiles, Open Buildings'
 per-country shards) were not pulled in full as part of building this job —
 impractical for a sandboxed task. The fetch/stream/parse code paths in
 `src/sources/` are written against the real, verified source formats and
 were exercised against real files during development (a real MS GlobalML
-tile, a real OCHA zip); what ships in `fixtures/` is a small, honest slice of
-that verification, not the full dataset.
+tile, a real OCHA zip, and — for B-5 — full live DuckDB queries against the
+real Overture dataset, not just a downloaded sample); what ships in
+`fixtures/` is a small, honest slice of that verification, not the full
+dataset.
 
 ## Not yet built
 
-POI ingestion (B-5, pending the P0-1 coverage spike), the derived
-`geo.population_grid` and `geo.data_coverage_cell` jobs (depend on B-4/B-5/B-6
-all being loaded for real — see `SODEJA_MVP_BACKLOG.md`'s Phase 0 refinement
-#7), and coverage-tier suppression are all out of this package's current
-scope.
+The derived `geo.population_grid` and `geo.data_coverage_cell` jobs (depend
+on B-4/B-5/B-6 all being loaded for real — see `SODEJA_MVP_BACKLOG.md`'s
+Phase 0 refinement #7) and coverage-tier suppression are out of this
+package's current scope.
 
 ## Related backlog items
 
-B-4 (footprints), B-6 (admin geometry + census). B-5 (POI) is not implemented
-here.
+B-4 (footprints), B-5 (POI), B-6 (admin geometry + census).

@@ -18,12 +18,14 @@
     "test": "vitest run",
     "ingest:admin-areas": "node dist/cli.js admin-areas",
     "ingest:footprints": "node dist/cli.js footprints",
-    "ingest:census": "node dist/cli.js census"
+    "ingest:census": "node dist/cli.js census",
+    "ingest:poi": "node dist/cli.js poi"
   },
   "dependencies": {
     "@sodeja/db": "workspace:*",
     "@sodeja/observability": "workspace:*",
     "adm-zip": "^0.5.16",
+    "duckdb": "^1.4.4",
     "pg": "^8.22.0"
   },
   "devDependencies": {
