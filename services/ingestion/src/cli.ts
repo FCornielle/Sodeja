@@ -4,11 +4,13 @@ import { closePool } from "@sodeja/db";
 import { runIngestAdminAreasJob } from "./jobs/ingestAdminAreas.js";
 import { runIngestBuildingFootprintsJob } from "./jobs/ingestBuildingFootprints.js";
 import { runIngestCensusPopulationJob } from "./jobs/ingestCensusPopulation.js";
+import { runIngestPoiPlacesJob } from "./jobs/ingestPoiPlaces.js";
 
 const JOBS: Record<string, (logger: ReturnType<typeof createLogger>) => Promise<void>> = {
   "admin-areas": runIngestAdminAreasJob,
   footprints: runIngestBuildingFootprintsJob,
   census: runIngestCensusPopulationJob,
+  poi: runIngestPoiPlacesJob,
 };
 
 async function main(): Promise<void> {

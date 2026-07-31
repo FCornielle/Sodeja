@@ -1,0 +1,38 @@
+{"id":"259560e1-c4cd-41df-93b1-dda822863274","name":"La Zona Del Marisco","category":"restaurant","confidence":0.7106356024742126,"lon":-69.9663612,"lat":18.4311843}
+{"id":"d65c95c1-be9d-45da-8e7d-0afd538de95a","name":"Meats & More","category":"restaurant","confidence":0.9961209642887116,"lon":-69.96666658,"lat":18.44364006}
+{"id":"98c92a3b-cf5e-46db-987e-5e613ae16db1","name":"Alex Master Chef RD","category":"restaurant","confidence":0.32360222935676575,"lon":-69.96855935,"lat":18.44398871}
+{"id":"fcfe50f8-57c8-4e5d-9eec-38a024a16b8b","name":"Mi Sabroso Pastel en Hoja","category":"dominican_restaurant","confidence":0.4649801254272461,"lon":-69.96989067,"lat":18.43124219}
+{"id":"9387ab5b-6632-4539-b06d-d578363058d5","name":"Adrian Tropical","category":"dominican_restaurant","confidence":0.9981771250665188,"lon":-69.90338017,"lat":18.46036099}
+{"id":"949b2e52-9460-4242-9396-805dc1717b1d","name":"Manolo's","category":"dominican_restaurant","confidence":0.9890753030776978,"lon":-69.90075076,"lat":18.46416619}
+{"id":"b18f6b73-b57f-40a9-a89b-d6ee05a5f1c7","name":"Altoque Fast Food RD","category":"fast_food_restaurant","confidence":0.5968762636184692,"lon":-69.9660381,"lat":18.4303847}
+{"id":"5ca14001-c63d-49e9-ac46-565966b9bff3","name":"Aderezzao","category":"fast_food_restaurant","confidence":0.1441136747598648,"lon":-69.96558877,"lat":18.44401296}
+{"id":"e5dd359f-2309-430e-a439-73091592b8bd","name":"Burger King","category":"fast_food_restaurant","confidence":0.8,"lon":-69.968596,"lat":18.465343}
+{"id":"fdb02712-92a9-4536-a2ec-0a0437170bae","name":"Super Colmado Mejía","category":"convenience_store","confidence":0.686119019985199,"lon":-69.966976563397,"lat":18.441956438698}
+{"id":"5a78638e-4cfa-455c-bb37-7953c44989f8","name":"Prolimpiso","category":"convenience_store","confidence":0.7710489630699158,"lon":-69.96816579,"lat":18.45134244}
+{"id":"3371e9df-6ccc-4cce-9393-e5a5e34fc80d","name":"Construservice","category":"convenience_store","confidence":0.8131867051124573,"lon":-69.96190377,"lat":18.44750127}
+{"id":"f781713b-959e-4ced-908d-59f8106db8ca","name":"Sacado del horno","category":"grocery_store","confidence":0.5745142102241516,"lon":-69.96603,"lat":18.43053}
+{"id":"fc695fa5-ac47-44ab-9c3d-bf50a21d5027","name":"Granja La Sacristia","category":"grocery_store","confidence":0.7004954814910889,"lon":-69.966516964404,"lat":18.432357512203076}
+{"id":"b878ac31-3081-420c-819c-fc383118395e","name":"Super Colmado Katia","category":"grocery_store","confidence":0.21604686975479126,"lon":-69.96901081,"lat":18.43025512}
+{"id":"9f97e1dd-ec00-478d-bf1a-411d280ad7df","name":"Ferreteria O&D abierto HASTA LAS 12 de la NOCHE","category":"hardware_store","confidence":0.9094191789627075,"lon":-69.965866,"lat":18.432606}
+{"id":"6c1db69a-4376-4516-ba51-e95560cbd726","name":"Impreica","category":"hardware_store","confidence":0.775837242603302,"lon":-69.9680721,"lat":18.43158812}
+{"id":"6f72b841-fe18-4535-baf6-7d94c79a48f5","name":"Innova Centro","category":"hardware_store","confidence":0.77,"lon":-69.96927224923826,"lat":18.460877501389145}
+{"id":"4c2263d8-c66c-49f8-8a09-963fedc9c325","name":"Salon suriel","category":"beauty_salon","confidence":0.5569033622741699,"lon":-69.96956786666834,"lat":18.431485900002013}
+{"id":"6e0647eb-21e0-4c2d-afab-4ae3eb13441a","name":"Avenue Montaigne","category":"beauty_salon","confidence":0.5208585262298584,"lon":-69.96631227,"lat":18.44408648}
+{"id":"51d8a885-3a04-4211-9d8f-38e6199c68a5","name":"Salon KC Factory","category":"beauty_salon","confidence":0.8605034947395325,"lon":-69.96783512,"lat":18.44350235}
+{"id":"5303d646-b2ab-40ac-a4c0-8a0a8f287205","name":"RyE Barbershop","category":"hair_salon","confidence":0.4049695134162903,"lon":-69.96502693,"lat":18.44906925}
+{"id":"ee953880-b005-445a-b3c8-42ec7a2171d2","name":"Zarys Closet y Peluquería","category":"hair_salon","confidence":0.28289997577667236,"lon":-69.96344699,"lat":18.44560348}
+{"id":"3b71efb2-10f8-4af1-88a6-05a71c431d38","name":"Peluqueria Jorge Luis","category":"hair_salon","confidence":0.5586669445037842,"lon":-69.96199926,"lat":18.44710545}
+{"id":"4a240a77-679e-4533-8c56-92d0c6556020","name":"Chic nails","category":"nail_salon","confidence":0.23429912328720093,"lon":-69.96887444,"lat":18.43083641}
+{"id":"af4b873e-eb4d-4580-9c4b-0a0c3ea9679b","name":"Lewanda Centro de Uñas y Estética","category":"nail_salon","confidence":0.9147447347640991,"lon":-69.969481,"lat":18.43165}
+{"id":"8b1b0717-a6f0-4c73-88e9-99c06c03d9d8","name":"Mia nail bar","category":"nail_salon","confidence":0.37157943844795227,"lon":-69.96561606,"lat":18.43338596}
+{"id":"f5be8b89-7f23-4ccf-bf47-836517a743a2","name":"Nats Essentials","category":"beauty_and_spa","confidence":0.2919577658176422,"lon":-69.96601216421752,"lat":18.430026426388565}
+{"id":"fbaccf0f-f7dc-4193-9fad-d9dd19d02a5d","name":"Beauty Moon RD","category":"beauty_and_spa","confidence":0.20503780245780945,"lon":-69.96595,"lat":18.43003}
+{"id":"a59eeca4-bbd1-4e63-8887-02d19e14ecd2","name":"Integralis Beauty Studio","category":"beauty_and_spa","confidence":0.836866021156311,"lon":-69.96609,"lat":18.44386}
+{"id":"95c94f1b-9928-452e-8418-656c3f9ecff6","name":"Ministerio Vive","category":"church_cathedral","confidence":0.631869912147522,"lon":-69.96951,"lat":18.45047003497}
+{"id":"604f7e0f-2f5b-4528-a4ab-552b92c49861","name":"Iglesia Bautista China","category":"church_cathedral","confidence":0.9411470890045166,"lon":-69.96933388,"lat":18.45076457}
+{"id":"5090a9e4-3f03-4a82-9276-e835daadb00f","name":"Iglesia Casa del Rey Jesus","category":"church_cathedral","confidence":0.9809945225715637,"lon":-69.96851899,"lat":18.45126569}
+{"id":"886599af-2b85-444e-a10a-869494d3f37e","name":"Residencial Topacio 1","category":"landmark_and_historical_building","confidence":0.5591430068016052,"lon":-69.96744946,"lat":18.43063017}
+{"id":"23200242-b19a-4079-8743-427296661cd2","name":"Edificio Enriquillo","category":"landmark_and_historical_building","confidence":0.5068092346191406,"lon":-69.96911526,"lat":18.43351692}
+{"id":"6fbed1c3-5161-4dfd-b1c6-8f7eee194493","name":"villa alejandrina","category":"landmark_and_historical_building","confidence":0.6766919493675232,"lon":-69.9678017989118,"lat":18.435351631526224}
+{"id":"75625a8f-ccd7-45ed-8187-5cbe8e5b370e","name":"Gabybrowslashes","category":null,"confidence":0.28068235516548157,"lon":-69.9659203,"lat":18.4306376}
+{"id":"b1678214-d5a3-4a66-aaab-d50f007361b1","name":"Furgones Harvey","category":null,"confidence":0.6768772006034851,"lon":-69.9660381,"lat":18.4303847}

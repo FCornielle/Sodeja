@@ -16,6 +16,11 @@ export interface MultiPolygonGeometry {
 
 export type PolygonalGeometry = PolygonGeometry | MultiPolygonGeometry;
 
+export interface PointGeometry {
+  type: "Point";
+  coordinates: [number, number]; // [lon, lat]
+}
+
 export interface GeoJsonFeature<
   P extends Record<string, unknown> = Record<string, unknown>,
   G = PolygonalGeometry,

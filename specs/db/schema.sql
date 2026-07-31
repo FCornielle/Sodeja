@@ -214,6 +214,17 @@ CREATE TABLE geo.poi_place (
   source         text NOT NULL,
   source_license text NOT NULL,
   source_vintage date NOT NULL,
+  -- ADDED via ALTER TABLE, B-5 (packages/db/migrations/*_add-poi-place-
+  -- confidence.sql), per the P0-1 Overture coverage spike
+  -- (docs/SODEJA_DATA_SOURCES.md): a majority of DR records sit below 0.7
+  -- confidence, so the spike recommended keeping confidence first-class and
+  -- queryable rather than silently dropping low-confidence rows at
+  -- ingestion time. Nullable because Overture does not report confidence
+  -- for every place the way Open Buildings does for footprints. Listed last
+  -- (rather than grouped near category/raw_category) because that migration
+  -- appends it after source_vintage, matching this table's real physical
+  -- column order.
+  confidence     numeric(4,3) CHECK (confidence BETWEEN 0 AND 1),
   UNIQUE (source, external_id)
 );
 CREATE INDEX poi_place_geom_gix ON geo.poi_place USING gist (geom);
