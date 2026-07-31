@@ -1,0 +1,4 @@
+admin_level,admin_area_code,population,households,census_year,source,source_vintage
+pais,DO,10760028,4418619,2022,ONE Censo 2022 (FIXTURE — national total is real; row exists only to test the loader),2022-01-01
+provincia,DO0101,289574,91234,2022,ONE Censo 2022 (FIXTURE — arbitrary split of the national total; not a real sub-national figure),2022-01-01
+municipio,DO010102,18234,5678,2022,ONE Censo 2022 (FIXTURE — arbitrary split of the national total; not a real sub-national figure),2022-01-01
