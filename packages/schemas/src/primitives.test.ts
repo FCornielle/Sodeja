@@ -6,6 +6,7 @@ import {
   MoneySchema,
   NumericRangeSchema,
   ProvenanceSchema,
+  ResolvedParameterSchema,
 } from "./primitives.js";
 
 describe("MoneySchema", () => {
@@ -83,6 +84,34 @@ describe("CitationSchema", () => {
       CitationSchema.safeParse({ sourceDocument: "", retrievedAt: "2026-07-25T00:00:00.000Z" })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("ResolvedParameterSchema", () => {
+  const valid = {
+    parameterTableSlug: "tss_ceiling_base",
+    valueLow: 23223,
+    valueBase: 23223,
+    valueHigh: 23223,
+    currency: "DOP" as const,
+    citation: {
+      sourceDocument: "Ley 87-01 — Sistema Dominicano de Seguridad Social",
+      retrievedAt: "2026-07-25T00:00:00.000Z",
+    },
+    provenance: "referencia_sectorial" as const,
+    validFrom: "2026-02-01T00:00:00.000Z",
+  };
+
+  it("accepts the exact shape @sodeja/rules resolves and @sodeja/calc consumes", () => {
+    expect(ResolvedParameterSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("accepts a null currency for unitless ratios", () => {
+    expect(ResolvedParameterSchema.safeParse({ ...valid, currency: null }).success).toBe(true);
+  });
+
+  it("rejects a low bound above base", () => {
+    expect(ResolvedParameterSchema.safeParse({ ...valid, valueLow: 99999 }).success).toBe(false);
   });
 });
 

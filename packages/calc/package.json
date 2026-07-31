@@ -1,5 +1,5 @@
 {
-  "name": "@sodeja/schemas",
+  "name": "@sodeja/calc",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,9 +18,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "zod": "^3.25.76"
+    "@sodeja/schemas": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1"
+    "@types/node": "^26.1.1",
+    "fast-check": "^4.9.0"
   }
 }

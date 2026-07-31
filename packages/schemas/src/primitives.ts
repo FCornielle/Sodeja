@@ -55,6 +55,8 @@ export type Provenance = z.infer<typeof ProvenanceSchema>;
  * as data"): a rule or figure with no citation cannot be published.
  */
 export const CitationSchema = z.object({
+  /** e.g. 'DGII', 'Comité Nacional de Salarios' — content.citation.source_name */
+  sourceName: z.string().min(1).optional(),
   sourceUrl: z.string().url().optional(),
   sourceDocument: z.string().min(1),
   article: z.string().optional(),
@@ -62,6 +64,35 @@ export const CitationSchema = z.object({
   effectiveDate: z.string().datetime().optional(),
 });
 export type Citation = z.infer<typeof CitationSchema>;
+
+/**
+ * The wire contract between `@sodeja/rules` and `@sodeja/calc` (backlog B-10 /
+ * B-16). This is what `content.parameter_value` resolution returns and what
+ * the calc engine takes as an injected rate/ratio — defined once, here, so
+ * neither package needs a translation layer to agree on the shape (the engine
+ * "knows how to compute, never what the current rate is" —
+ * SODEJA_ARCHITECTURE.md "`@sodeja/calc`"). Never a point estimate: low/base/high
+ * mirror content.parameter_value's three-point-value design (risk D1).
+ */
+export const ResolvedParameterSchema = z
+  .object({
+    parameterTableSlug: z.string().min(1),
+    businessTypeSlug: z.string().min(1).optional(),
+    jurisdictionSlug: z.string().min(1).optional(),
+    valueLow: z.number().finite(),
+    valueBase: z.number().finite(),
+    valueHigh: z.number().finite(),
+    /** null for unitless ratios (capacity ratios, area shares) — mirrors content.parameter_value.currency */
+    currency: CurrencySchema.nullable(),
+    citation: CitationSchema,
+    provenance: ProvenanceSchema,
+    validFrom: z.string().datetime(),
+    validTo: z.string().datetime().optional(),
+  })
+  .refine((p) => p.valueLow <= p.valueBase && p.valueBase <= p.valueHigh, {
+    message: "A pessimistic (low) bound must not exceed base, and base must not exceed the optimistic (high) bound",
+  });
+export type ResolvedParameter = z.infer<typeof ResolvedParameterSchema>;
 
 /**
  * Per-area data-coverage score (risk D3): distinguishes "low competition"
