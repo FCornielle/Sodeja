@@ -1,8 +1,9 @@
 # `apps/api` — SODEJA API (Modular Monolith)
 
 **Status: `providers` (B-3), `catalog` (B-11), `projects` (B-11a + B-7a's
-area-confirmation slice), `capacity` (B-12) and `costs` (B-14 fit-out) are
-implemented. Every other module below is still a placeholder.**
+area-confirmation slice), `capacity` (B-12) and `costs` (B-14 fit-out +
+B-15 opex) are implemented. Every other module below is still a
+placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -25,7 +26,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | `catalog` | 5 | **Implemented (B-11).** `GET /business-types` — see "B-11 contract" below |
 | `layout` | 4 | Not built. Typology ratio templates |
 | `capacity` | 6 | **Implemented (B-12).** `POST /projects/:id/capacity-estimate` — see "B-12 contract" below |
-| `costs` | 9, 10 | **Implemented (B-14 fit-out; B-15 opex next).** `POST /projects/:id/fitout-estimate` — see "B-14 contract" below |
+| `costs` | 9, 10 | **Implemented (B-14 + B-15).** `POST /projects/:id/fitout-estimate`, `POST /projects/:id/opex-estimate` — see "B-14/B-15 contract" below |
 | `finance` | 7 | Not built (B-17). Financial projection; the integration point |
 | `rules` | 12 | Not built. Permit checklist evaluation |
 | `reports` | 13 | Not built. Enqueues work; does not render |
@@ -179,7 +180,7 @@ B-11 migration's comments); omitted, `staff_*` is `null` with a reason.
 `daily_customers_*` is always `null` — no `rotación`/turnover input exists
 yet to derive it from a real basis.
 
-## B-14 contract — `costs` fit-out (`src/costs/`)
+## B-14/B-15 contract — `costs` (`src/costs/`)
 
 **`POST /projects/:id/fitout-estimate`** — body
 `{ baseCostPerSqmLow, baseCostPerSqmBase, baseCostPerSqmHigh, currency? }`
@@ -194,6 +195,31 @@ one real, cited DR construction figure
 Dec 2025). `indexBaseDate` is always `"2025-12-01"` (the index's real date,
 never the compute date). `resultsJson.disclaimer` always carries the
 "indicative, not authoritative" caveat the schema comment requires.
+
+**`POST /projects/:id/opex-estimate`** — body
+`{ companySize, staffCount?, monthlyRentDop?, monthlyUtilitiesDop? }`
+(`OpexEstimateRequestSchema`). `409` if the area is not confirmed, or if
+neither a usable staff count nor rent/utilities are available at all (never
+persists an all-`null` row — `app.opex_estimate`'s amount columns are `NOT
+NULL`). `companySize` is **required and explicit** — the real dual-criteria
+legal determination (Ley 488-08: headcount AND annual gross sales) cannot be
+evaluated without a financial projection (B-17, not built), so this
+endpoint never guesses a tier.
+
+Staff count comes from the project's latest `app.capacity_estimate.staff_*`
+by default; `staffCount` on the request overrides that when the capacity
+estimate has none. Payroll = staff count × the minimum-wage tier for
+`companySize`, plus TSS employee-side SFS (3.04%) + AFP (2.87%) + INFOTEP
+(1%), all resolved via `@sodeja/rules` from `1785510924741_seed-rules-content.sql`
+— never a hardcoded literal. **TSS employer-side AFP % is never computed**
+(`resultsJson.employerAfpNote` documents why: Ley 87-01's primary text
+returned 403 on both verification attempts). For `restaurante` specifically,
+`resultsJson.restaurantWageCaveat` flags that the general wage table
+understates the real (separate, higher) gastronomic minimum wage, which was
+not seedable (scanned, non-machine-readable source). Rent/utilities are
+optional, uncurated line items — supplied directly or absent; `resultsJson.partial`
+is `true` whenever either is missing, so the total is legible as incomplete
+rather than presented as a full opex picture.
 
 ## Architectural rules
 
@@ -232,4 +258,4 @@ user sees, it lives in `@sodeja/calc`.
 
 ## Related backlog items
 
-B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, B-14, and every other module item B-7 through B-20.
+B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, B-14, B-15, and every other module item B-7 through B-20.

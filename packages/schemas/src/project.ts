@@ -244,3 +244,48 @@ export const FitoutEstimateSchema = z.object({
   computedAt: z.string().datetime(),
 });
 export type FitoutEstimate = z.infer<typeof FitoutEstimateSchema>;
+
+// =========================================================================
+// B-15 — operating cost estimate
+// =========================================================================
+
+/**
+ * DR company size (micro/pequeña/mediana/grande) is a legal determination
+ * from dual criteria (headcount AND annual gross sales, Ley 488-08 / MICM
+ * Res. 79-2025) that this system cannot evaluate — no financial projection
+ * (gross sales) exists yet (that is B-17). `companySize` is therefore a
+ * required, explicit input here — never guessed from headcount alone.
+ */
+export const CompanySizeSchema = z.enum(["micro", "pequena", "mediana", "grande"]);
+export type CompanySize = z.infer<typeof CompanySizeSchema>;
+
+/**
+ * `POST /projects/:id/opex-estimate` body. `staffCount` overrides
+ * `app.capacity_estimate.staff_base` (the normal source) when that estimate
+ * has no staff figure — e.g. it was computed before a staff count was ever
+ * supplied. Rent/utilities are optional, curated-nowhere line items
+ * (docs/SODEJA_DATA_SOURCES.md table c): supplying neither still produces a
+ * valid (partial) estimate from payroll + TSS + INFOTEP alone.
+ */
+export const OpexEstimateRequestSchema = z.object({
+  companySize: CompanySizeSchema,
+  staffCount: z.number().int().nonnegative().optional(),
+  monthlyRentDop: z.number().nonnegative().optional(),
+  monthlyUtilitiesDop: z.number().nonnegative().optional(),
+});
+export type OpexEstimateRequest = z.infer<typeof OpexEstimateRequestSchema>;
+
+export const OpexEstimateSchema = z.object({
+  id: z.number().int(),
+  projectId: z.string().uuid(),
+  engineVersion: z.string().min(1),
+  asOfDate: z.string(),
+  inputsSnapshot: z.record(z.string(), z.unknown()),
+  resultsJson: z.record(z.string(), z.unknown()),
+  monthlyLowAmount: z.number(),
+  monthlyBaseAmount: z.number(),
+  monthlyHighAmount: z.number(),
+  currency: CurrencySchema,
+  computedAt: z.string().datetime(),
+});
+export type OpexEstimate = z.infer<typeof OpexEstimateSchema>;
