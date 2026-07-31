@@ -1,7 +1,9 @@
 # `apps/api` — SODEJA API (Modular Monolith)
 
-**Status: `providers` (B-3), `catalog` (B-11) and a minimal `projects`
-(B-11a) are implemented. Every other module below is still a placeholder.**
+**Status: `providers` (B-3), `catalog` (B-11), `projects` (B-11a + B-7a's
+area-confirmation slice), `capacity` (B-12) and `costs` (B-14 fit-out +
+B-15 opex) are implemented. Every other module below is still a
+placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -18,13 +20,13 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | NestJS module | Product module | Notes |
 |---|---|---|
 | `auth` | — | Not built. Supabase JWT verification; RLS is the real enforcement layer. Until it lands, every route below reads `userId` from an `x-user-id` header (`src/common/current-user-id.decorator.ts`) — an explicit placeholder, not an auth boundary |
-| `projects` | — | **Implemented (B-11a), minimal.** `POST /projects` (create only — no update/delete/list) + the assumptions sub-resource. See "B-11a contract" below |
+| `projects` | — | **Implemented (B-11a + B-7a), minimal.** `POST /projects` (create only — no update/delete/list) + the assumptions sub-resource + `PUT /projects/:id/location` (the area-confirmation gate). See "B-11a contract" and "B-7a contract" below |
 | `geo` | 2, 3 | Not built. Footprint lookup, polygon validation, coverage scoring |
 | `market-study` | 1 | Not built. Population + competition counts + confidence score |
 | `catalog` | 5 | **Implemented (B-11).** `GET /business-types` — see "B-11 contract" below |
 | `layout` | 4 | Not built. Typology ratio templates |
-| `capacity` | 6 | Not built (B-12, next). Thin wrapper over `@sodeja/calc` |
-| `costs` | 9, 10 | Not built (B-14/B-15, next). Fit-out and operating cost estimates |
+| `capacity` | 6 | **Implemented (B-12).** `POST /projects/:id/capacity-estimate` — see "B-12 contract" below |
+| `costs` | 9, 10 | **Implemented (B-14 + B-15).** `POST /projects/:id/fitout-estimate`, `POST /projects/:id/opex-estimate` — see "B-14/B-15 contract" below |
 | `finance` | 7 | Not built (B-17). Financial projection; the integration point |
 | `rules` | 12 | Not built. Permit checklist evaluation |
 | `reports` | 13 | Not built. Enqueues work; does not render |
@@ -133,6 +135,92 @@ client to prompt a recompute, **not** an audit log and **not** a claim that
 those estimates were actually recomputed — B-12/B-14/B-15/B-17 own
 recomputation itself.
 
+## B-7a contract — area confirmation gate (`src/projects/`, `src/common/area-gate.ts`)
+
+**`PUT /projects/:id/location`** — body `{ areaSqm, centroidLon, centroidLat }`
+(`ConfirmProjectLocationRequestSchema`). Idempotent upsert into
+`app.project_location`; always writes `area_source = 'user_entered'` (the
+only source reachable without the map UI — B-7/B-8, not built) and
+`area_confirmed_at = now()`. `404` if the project does not exist or is not
+owned by the caller; `400` on an out-of-range lon/lat. Returns:
+
+```ts
+// ProjectLocation (@sodeja/schemas project.ts)
+{
+  projectId: string;       // uuid
+  areaSqm: number;
+  areaSource: "footprint_dataset" | "user_drawn" | "user_entered"; // always "user_entered" from this endpoint
+  areaConfirmedAt: string; // ISO datetime
+  centroidLon: number; centroidLat: number;
+  updatedAt: string;
+}
+```
+
+**The gate itself** (`src/common/area-gate.ts`'s `requireConfirmedArea`) is
+called by `capacity`, `fitout`, and `opex` before any computation: `409` if
+`app.project_location` has no row for the project or `area_confirmed_at IS
+NULL`. This is risk T1's mitigation enforced in code, not merely documented.
+
+## B-12 contract — `capacity` (`src/capacity/`)
+
+**`POST /projects/:id/capacity-estimate`** — body `{ staffCount? }`
+(`CapacityEstimateRequestSchema`). Computes AND persists a new
+`app.capacity_estimate` row (no separate `GET`; call again to recompute).
+`404` if the project does not exist/is not owned by the caller; `409` if the
+area is not confirmed (B-7a) or the project has no business type.
+
+Resolves the project's business type's `domain='capacity'` ratio (via
+`@sodeja/rules`) and divides the confirmed area by it using `@sodeja/calc`'s
+`Range` primitives — `seats_low/base/high` are `null`, with a reason string
+in `resultsJson.seatsReason`, for a business type with no seeded ratio
+(currently `salon`; this is a legitimate absence per the B-11 migration, not
+an error). `staff_low/base/high` are populated **only** from the request's
+`staffCount` — no staffing-density ratio exists to derive one from (see the
+B-11 migration's comments); omitted, `staff_*` is `null` with a reason.
+`daily_customers_*` is always `null` — no `rotación`/turnover input exists
+yet to derive it from a real basis.
+
+## B-14/B-15 contract — `costs` (`src/costs/`)
+
+**`POST /projects/:id/fitout-estimate`** — body
+`{ baseCostPerSqmLow, baseCostPerSqmBase, baseCostPerSqmHigh, currency? }`
+(`FitoutEstimateRequestSchema`, `currency` defaults `"DOP"`). The base
+construction cost per m² is **always** the caller's own input — no DR
+commercial fit-out cost basis exists at any confidence level
+(`docs/SODEJA_DATA_SOURCES.md`), so nothing is seeded as a default. `409` if
+the area is not confirmed. Computes `total = baseCostPerSqm × area ×
+(1 + ICDV escalation rate)` via `@sodeja/calc`, where the ICDV rate is the
+one real, cited DR construction figure
+(`packages/db/migrations/1785540000000_seed-construction-icdv.sql`, +3.72%,
+Dec 2025). `indexBaseDate` is always `"2025-12-01"` (the index's real date,
+never the compute date). `resultsJson.disclaimer` always carries the
+"indicative, not authoritative" caveat the schema comment requires.
+
+**`POST /projects/:id/opex-estimate`** — body
+`{ companySize, staffCount?, monthlyRentDop?, monthlyUtilitiesDop? }`
+(`OpexEstimateRequestSchema`). `409` if the area is not confirmed, or if
+neither a usable staff count nor rent/utilities are available at all (never
+persists an all-`null` row — `app.opex_estimate`'s amount columns are `NOT
+NULL`). `companySize` is **required and explicit** — the real dual-criteria
+legal determination (Ley 488-08: headcount AND annual gross sales) cannot be
+evaluated without a financial projection (B-17, not built), so this
+endpoint never guesses a tier.
+
+Staff count comes from the project's latest `app.capacity_estimate.staff_*`
+by default; `staffCount` on the request overrides that when the capacity
+estimate has none. Payroll = staff count × the minimum-wage tier for
+`companySize`, plus TSS employee-side SFS (3.04%) + AFP (2.87%) + INFOTEP
+(1%), all resolved via `@sodeja/rules` from `1785510924741_seed-rules-content.sql`
+— never a hardcoded literal. **TSS employer-side AFP % is never computed**
+(`resultsJson.employerAfpNote` documents why: Ley 87-01's primary text
+returned 403 on both verification attempts). For `restaurante` specifically,
+`resultsJson.restaurantWageCaveat` flags that the general wage table
+understates the real (separate, higher) gastronomic minimum wage, which was
+not seedable (scanned, non-machine-readable source). Rent/utilities are
+optional, uncurated line items — supplied directly or absent; `resultsJson.partial`
+is `true` whenever either is missing, so the total is legible as incomplete
+rather than presented as a full opex picture.
+
 ## Architectural rules
 
 **Cross-module calls go through service interfaces only.** No module reaches
@@ -170,4 +258,4 @@ user sees, it lives in `@sodeja/calc`.
 
 ## Related backlog items
 
-B-1, B-2, B-3, B-11, B-11a, and every other module item B-7 through B-20.
+B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, B-14, B-15, and every other module item B-7 through B-20.

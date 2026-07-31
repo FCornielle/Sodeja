@@ -126,3 +126,166 @@ export const BusinessTypeCatalogEntrySchema = z.object({
   parameters: z.array(ResolvedParameterSchema),
 });
 export type BusinessTypeCatalogEntry = z.infer<typeof BusinessTypeCatalogEntrySchema>;
+
+// =========================================================================
+// B-7a — area confirmation gate
+// =========================================================================
+
+/**
+ * Mirrors `app.area_source` (specs/db/schema.sql). `PUT /projects/:id/location`
+ * (the only area-confirmation endpoint this backlog slice builds) always
+ * writes `'user_entered'` — `'footprint_dataset'`/`'user_drawn'` require the
+ * map UI and footprint-confirm flow (B-7/B-8), not built here.
+ */
+export const AreaSourceSchema = z.enum(["footprint_dataset", "user_drawn", "user_entered"]);
+export type AreaSource = z.infer<typeof AreaSourceSchema>;
+
+/**
+ * `PUT /projects/:id/location` body. The narrowest possible slice of B-7a:
+ * no map, no polygon, no footprint suggestion — just an explicit,
+ * user-typed area and point location, which is enough to satisfy the
+ * `area_confirmed_at IS NULL OR area_sqm IS NOT NULL` gate that
+ * capacity/fit-out/opex all sit behind (risk T1).
+ */
+export const ConfirmProjectLocationRequestSchema = z.object({
+  areaSqm: z.number().positive(),
+  centroidLon: z.number().min(-180).max(180),
+  centroidLat: z.number().min(-90).max(90),
+});
+export type ConfirmProjectLocationRequest = z.infer<typeof ConfirmProjectLocationRequestSchema>;
+
+export const ProjectLocationSchema = z.object({
+  projectId: z.string().uuid(),
+  areaSqm: z.number().positive(),
+  areaSource: AreaSourceSchema,
+  /** Non-null once confirmed — this endpoint always sets it, so always present in the response. */
+  areaConfirmedAt: z.string().datetime(),
+  centroidLon: z.number(),
+  centroidLat: z.number(),
+  updatedAt: z.string().datetime(),
+});
+export type ProjectLocation = z.infer<typeof ProjectLocationSchema>;
+
+// =========================================================================
+// B-12 — capacity estimate
+// =========================================================================
+
+/**
+ * `POST /projects/:id/capacity-estimate` body. `staffCount` is the ONLY way
+ * to populate `staff_*` on the stored estimate: no staffing-density ratio
+ * was seeded (packages/db/migrations/1785520000000_seed-capacity-parameters.sql
+ * deliberately left it uncovered — no genuine DR or international standard
+ * was found with real confidence), so a fabricated ratio is not an option.
+ * Omit it and `staff_*` is persisted as `null`.
+ */
+export const CapacityEstimateRequestSchema = z.object({
+  staffCount: z.number().int().nonnegative().optional(),
+});
+export type CapacityEstimateRequest = z.infer<typeof CapacityEstimateRequestSchema>;
+
+export const CapacityEstimateSchema = z.object({
+  id: z.number().int(),
+  projectId: z.string().uuid(),
+  engineVersion: z.string().min(1),
+  asOfDate: z.string(),
+  inputsSnapshot: z.record(z.string(), z.unknown()),
+  resultsJson: z.record(z.string(), z.unknown()),
+  seatsLow: z.number().int().nullable(),
+  seatsBase: z.number().int().nullable(),
+  seatsHigh: z.number().int().nullable(),
+  staffLow: z.number().int().nullable(),
+  staffBase: z.number().int().nullable(),
+  staffHigh: z.number().int().nullable(),
+  dailyCustomersLow: z.number().int().nullable(),
+  dailyCustomersBase: z.number().int().nullable(),
+  dailyCustomersHigh: z.number().int().nullable(),
+  computedAt: z.string().datetime(),
+});
+export type CapacityEstimate = z.infer<typeof CapacityEstimateSchema>;
+
+// =========================================================================
+// B-14 — fit-out cost estimate
+// =========================================================================
+
+/**
+ * `POST /projects/:id/fitout-estimate` body. No DR commercial fit-out cost
+ * basis exists at any confidence level (docs/SODEJA_DATA_SOURCES.md table c)
+ * — the base construction cost per m² is therefore a REQUIRED, explicit
+ * user input (provenance 'usuario'), never a seeded default. The caller
+ * supplies their own low/base/high band (e.g. from a contractor quote);
+ * the engine applies the ICDV escalation factor on top — it does not invent
+ * the spread itself.
+ */
+export const FitoutEstimateRequestSchema = z
+  .object({
+    baseCostPerSqmLow: z.number().positive(),
+    baseCostPerSqmBase: z.number().positive(),
+    baseCostPerSqmHigh: z.number().positive(),
+    currency: CurrencySchema.default("DOP"),
+  })
+  .refine((v) => v.baseCostPerSqmLow <= v.baseCostPerSqmBase && v.baseCostPerSqmBase <= v.baseCostPerSqmHigh, {
+    message: "baseCostPerSqmLow must be <= baseCostPerSqmBase, and baseCostPerSqmBase must be <= baseCostPerSqmHigh",
+  });
+export type FitoutEstimateRequest = z.infer<typeof FitoutEstimateRequestSchema>;
+
+export const FitoutEstimateSchema = z.object({
+  id: z.number().int(),
+  projectId: z.string().uuid(),
+  engineVersion: z.string().min(1),
+  asOfDate: z.string(),
+  inputsSnapshot: z.record(z.string(), z.unknown()),
+  resultsJson: z.record(z.string(), z.unknown()),
+  totalLowAmount: z.number(),
+  totalBaseAmount: z.number(),
+  totalHighAmount: z.number(),
+  currency: CurrencySchema,
+  /** The ICDV figure's real date (Dec 2025) — never `asOfDate`, which is when this estimate was computed. */
+  indexBaseDate: z.string(),
+  computedAt: z.string().datetime(),
+});
+export type FitoutEstimate = z.infer<typeof FitoutEstimateSchema>;
+
+// =========================================================================
+// B-15 — operating cost estimate
+// =========================================================================
+
+/**
+ * DR company size (micro/pequeña/mediana/grande) is a legal determination
+ * from dual criteria (headcount AND annual gross sales, Ley 488-08 / MICM
+ * Res. 79-2025) that this system cannot evaluate — no financial projection
+ * (gross sales) exists yet (that is B-17). `companySize` is therefore a
+ * required, explicit input here — never guessed from headcount alone.
+ */
+export const CompanySizeSchema = z.enum(["micro", "pequena", "mediana", "grande"]);
+export type CompanySize = z.infer<typeof CompanySizeSchema>;
+
+/**
+ * `POST /projects/:id/opex-estimate` body. `staffCount` overrides
+ * `app.capacity_estimate.staff_base` (the normal source) when that estimate
+ * has no staff figure — e.g. it was computed before a staff count was ever
+ * supplied. Rent/utilities are optional, curated-nowhere line items
+ * (docs/SODEJA_DATA_SOURCES.md table c): supplying neither still produces a
+ * valid (partial) estimate from payroll + TSS + INFOTEP alone.
+ */
+export const OpexEstimateRequestSchema = z.object({
+  companySize: CompanySizeSchema,
+  staffCount: z.number().int().nonnegative().optional(),
+  monthlyRentDop: z.number().nonnegative().optional(),
+  monthlyUtilitiesDop: z.number().nonnegative().optional(),
+});
+export type OpexEstimateRequest = z.infer<typeof OpexEstimateRequestSchema>;
+
+export const OpexEstimateSchema = z.object({
+  id: z.number().int(),
+  projectId: z.string().uuid(),
+  engineVersion: z.string().min(1),
+  asOfDate: z.string(),
+  inputsSnapshot: z.record(z.string(), z.unknown()),
+  resultsJson: z.record(z.string(), z.unknown()),
+  monthlyLowAmount: z.number(),
+  monthlyBaseAmount: z.number(),
+  monthlyHighAmount: z.number(),
+  currency: CurrencySchema,
+  computedAt: z.string().datetime(),
+});
+export type OpexEstimate = z.infer<typeof OpexEstimateSchema>;
