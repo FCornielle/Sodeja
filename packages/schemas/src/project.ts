@@ -202,3 +202,45 @@ export const CapacityEstimateSchema = z.object({
   computedAt: z.string().datetime(),
 });
 export type CapacityEstimate = z.infer<typeof CapacityEstimateSchema>;
+
+// =========================================================================
+// B-14 — fit-out cost estimate
+// =========================================================================
+
+/**
+ * `POST /projects/:id/fitout-estimate` body. No DR commercial fit-out cost
+ * basis exists at any confidence level (docs/SODEJA_DATA_SOURCES.md table c)
+ * — the base construction cost per m² is therefore a REQUIRED, explicit
+ * user input (provenance 'usuario'), never a seeded default. The caller
+ * supplies their own low/base/high band (e.g. from a contractor quote);
+ * the engine applies the ICDV escalation factor on top — it does not invent
+ * the spread itself.
+ */
+export const FitoutEstimateRequestSchema = z
+  .object({
+    baseCostPerSqmLow: z.number().positive(),
+    baseCostPerSqmBase: z.number().positive(),
+    baseCostPerSqmHigh: z.number().positive(),
+    currency: CurrencySchema.default("DOP"),
+  })
+  .refine((v) => v.baseCostPerSqmLow <= v.baseCostPerSqmBase && v.baseCostPerSqmBase <= v.baseCostPerSqmHigh, {
+    message: "baseCostPerSqmLow must be <= baseCostPerSqmBase, and baseCostPerSqmBase must be <= baseCostPerSqmHigh",
+  });
+export type FitoutEstimateRequest = z.infer<typeof FitoutEstimateRequestSchema>;
+
+export const FitoutEstimateSchema = z.object({
+  id: z.number().int(),
+  projectId: z.string().uuid(),
+  engineVersion: z.string().min(1),
+  asOfDate: z.string(),
+  inputsSnapshot: z.record(z.string(), z.unknown()),
+  resultsJson: z.record(z.string(), z.unknown()),
+  totalLowAmount: z.number(),
+  totalBaseAmount: z.number(),
+  totalHighAmount: z.number(),
+  currency: CurrencySchema,
+  /** The ICDV figure's real date (Dec 2025) — never `asOfDate`, which is when this estimate was computed. */
+  indexBaseDate: z.string(),
+  computedAt: z.string().datetime(),
+});
+export type FitoutEstimate = z.infer<typeof FitoutEstimateSchema>;

@@ -1,8 +1,8 @@
 # `apps/api` — SODEJA API (Modular Monolith)
 
 **Status: `providers` (B-3), `catalog` (B-11), `projects` (B-11a + B-7a's
-area-confirmation slice) and `capacity` (B-12) are implemented. Every other
-module below is still a placeholder.**
+area-confirmation slice), `capacity` (B-12) and `costs` (B-14 fit-out) are
+implemented. Every other module below is still a placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -25,7 +25,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | `catalog` | 5 | **Implemented (B-11).** `GET /business-types` — see "B-11 contract" below |
 | `layout` | 4 | Not built. Typology ratio templates |
 | `capacity` | 6 | **Implemented (B-12).** `POST /projects/:id/capacity-estimate` — see "B-12 contract" below |
-| `costs` | 9, 10 | Not built (B-14/B-15, next). Fit-out and operating cost estimates |
+| `costs` | 9, 10 | **Implemented (B-14 fit-out; B-15 opex next).** `POST /projects/:id/fitout-estimate` — see "B-14 contract" below |
 | `finance` | 7 | Not built (B-17). Financial projection; the integration point |
 | `rules` | 12 | Not built. Permit checklist evaluation |
 | `reports` | 13 | Not built. Enqueues work; does not render |
@@ -179,6 +179,22 @@ B-11 migration's comments); omitted, `staff_*` is `null` with a reason.
 `daily_customers_*` is always `null` — no `rotación`/turnover input exists
 yet to derive it from a real basis.
 
+## B-14 contract — `costs` fit-out (`src/costs/`)
+
+**`POST /projects/:id/fitout-estimate`** — body
+`{ baseCostPerSqmLow, baseCostPerSqmBase, baseCostPerSqmHigh, currency? }`
+(`FitoutEstimateRequestSchema`, `currency` defaults `"DOP"`). The base
+construction cost per m² is **always** the caller's own input — no DR
+commercial fit-out cost basis exists at any confidence level
+(`docs/SODEJA_DATA_SOURCES.md`), so nothing is seeded as a default. `409` if
+the area is not confirmed. Computes `total = baseCostPerSqm × area ×
+(1 + ICDV escalation rate)` via `@sodeja/calc`, where the ICDV rate is the
+one real, cited DR construction figure
+(`packages/db/migrations/1785540000000_seed-construction-icdv.sql`, +3.72%,
+Dec 2025). `indexBaseDate` is always `"2025-12-01"` (the index's real date,
+never the compute date). `resultsJson.disclaimer` always carries the
+"indicative, not authoritative" caveat the schema comment requires.
+
 ## Architectural rules
 
 **Cross-module calls go through service interfaces only.** No module reaches
@@ -216,4 +232,4 @@ user sees, it lives in `@sodeja/calc`.
 
 ## Related backlog items
 
-B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, and every other module item B-7 through B-20.
+B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, B-14, and every other module item B-7 through B-20.
