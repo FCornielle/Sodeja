@@ -41,18 +41,30 @@ importers:
       '@nestjs/platform-express':
         specifier: ^11.1.28
         version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      '@sodeja/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@sodeja/observability':
         specifier: workspace:*
         version: link:../../packages/observability
       '@sodeja/providers':
         specifier: workspace:*
         version: link:../../packages/providers
+      '@sodeja/rules':
+        specifier: workspace:*
+        version: link:../../packages/rules
+      '@sodeja/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       '@nestjs/testing':
         specifier: ^11.1.28
