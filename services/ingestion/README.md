@@ -1,11 +1,12 @@
 # `services/ingestion` — Scheduled Data Ingestion Jobs
 
-**Status: B-6 (admin geometry + census) is implemented.** B-4 (building
-footprints) and B-5 (POI) are not yet — see "Not yet built" below.
+**Status: B-4 (building footprints) and B-6 (admin geometry + census) are
+implemented.** POI ingestion (B-5) and the derived population-grid /
+data-coverage jobs are not — see "Not yet built" below.
 
 Carved out of the monolith **from day one**: these jobs are long-running,
-memory-hungry, and must be able to fail without taking the API down. An
-ingestion job that OOMs should not return 503 to a user drawing a polygon.
+memory-hungry, and must be able to fail without taking the API down. A
+footprint import that OOMs should not return 503 to a user drawing a polygon.
 
 ## What's implemented
 
@@ -13,6 +14,7 @@ ingestion job that OOMs should not return 503 to a user drawing a polygon.
 |---|---|---|---|
 | Admin geometry | OCHA COD-AB on HDX (`dom_admin_boundaries.geojson.zip`) | `geo.admin_area` | `pnpm ingest:admin-areas` |
 | Census population | ONE Censo 2022 (manual REDATAM extract — see below) | `geo.census_population` | `pnpm ingest:census` |
+| Building footprints | Microsoft GlobalML (primary) + Google Open Buildings V3 (cross-check/gap-fill) | `geo.building_footprint` | `pnpm ingest:footprints` |
 
 Each job is a thin CLI wrapper (`src/cli.ts`) around a `run*Job(logger)`
 function in `src/jobs/`, which itself wraps a pure, DB-testable
@@ -26,28 +28,63 @@ and the DB writes testable without re-implementing HTTP fetch/parse logic.
 **Idempotent and re-runnable.** Every job stages fully-parsed rows into a
 session-scoped Postgres `TEMP TABLE` (`src/lib/tempTable.ts`) — outside any
 production-table transaction — and only then swaps them into `geo.*` inside a
-single `BEGIN`/`COMMIT` (delete-by-source, insert-from-staging, or an atomic
-upsert transaction for census). If fetching/parsing fails partway through, the
-temp table is simply dropped and `geo.*` was never opened for writing.
-Re-running a job with the same input produces the same end state, not
-duplicates.
+single `BEGIN`/`COMMIT` (delete-by-source, insert-from-staging). If
+fetching/parsing fails partway through, the temp table is simply dropped and
+`geo.*` was never opened for writing. Re-running a job with the same input
+produces the same end state, not duplicates.
 
 **Licence tier is enforced at write time.** These jobs write only to the
-`geo` schema. Per-record `source`, `source_license`/`source_vintage` are set
-on every row and are `NOT NULL` in the schema — an unattributed row is a
+`geo` schema. Per-record `source`, `source_license`, and `source_vintage` are
+set on every row and are `NOT NULL` in the schema — an unattributed row is a
 compliance defect, not untidy metadata (risks L4, L6).
 
 **Vintage is surfaced, not hidden.** `source_vintage` always reflects the
-upstream dataset's own vintage (OCHA's `valid_on`, ONE's census year) — never
-the date the job happened to run.
+upstream dataset's own vintage (MS GlobalML's build date, OCHA's
+`valid_on`, ONE's census year) — never the date the job happened to run.
 
 ## What must never be ingested
 
 Google Places content beyond `place_id` and coordinates, and any content
 derived from commercial satellite tiles. Neither applies to this package's
-current scope (admin geometry, census); the `ephemeral` schema exists
-precisely so that a future POI job (B-5) has somewhere to put short-lived,
-non-redistributable provider content without touching `geo.*`.
+current scope (footprints, admin geometry, census); the `ephemeral` schema
+exists precisely so that a future POI job (B-5) has somewhere to put
+short-lived, non-redistributable provider content without touching `geo.*`.
+
+## Building footprints (B-4)
+
+- **Primary: Microsoft GlobalML** (`src/sources/msGlobalMl.ts`). Fetches the
+  real, currently-live `dataset-links.csv` manifest, filters to
+  `MS_GLOBALML_REGION` (default `DominicanRepublic`, 18 quadkey tiles,
+  ~179MB total per the manifest), and streams each tile — despite the
+  `.csv.gz` extension, the body is gzip-compressed newline-delimited GeoJSON,
+  confirmed by downloading a real tile during development. `confidence: -1`
+  (Microsoft's "not applicable" sentinel — every row in the 2026-02-03 DR
+  build reports it) is normalized to `NULL` to satisfy the schema's
+  `BETWEEN 0 AND 1` CHECK.
+- **Cross-check/gap-fill: Google Open Buildings V3** (`src/sources/openBuildings.ts`).
+  Google does not publish one stable, predictable bulk-download manifest URL
+  per country the way Microsoft does (several candidate URLs were probed
+  during development and returned 404). Rather than hardcode a guess, this
+  source reads an explicit `OPEN_BUILDINGS_SOURCE_URLS` (comma-separated
+  gzipped CSV shard URLs) from the operator. **If unset, the footprint job
+  logs a clear warning and skips this source** — it is documented as
+  cross-check/gap-fill, not primary, so its absence does not fail B-4.
+  Parses Google's documented columns (`latitude, longitude, area_in_meters,
+  confidence, geometry, full_plus_code`); `geometry` (WKT) is converted to
+  GeoJSON (`src/lib/wkt.ts`) so both sources share one SQL insert path.
+- `area_sqm` is **always** computed by the job via `ST_Area(geom::geography)`
+  at insert time (never trusted from either source's own area field), per
+  `specs/db/schema.sql`'s comment on `geo.building_footprint.area_sqm`.
+- `admin_area_id` is resolved by a centroid-in-polygon spatial join
+  (`ST_Contains`) against whatever `geo.admin_area` rows exist at ingestion
+  time, picking the smallest-area (most specific) containing polygon when
+  several nest. `NULL` if nothing contains the centroid — an accepted
+  outcome, not an error.
+- License: MS GlobalML is CDLA-Permissive-2.0. Open Buildings V3 is
+  dual-licensed CC BY 4.0 / ODbL v1.0; this job records **CC BY 4.0** —
+  `SODEJA_ARCHITECTURE.md`'s licensing-boundary section flags ODbL's
+  share-alike obligation as needing legal review before use, so the
+  attribution-only option is used until that review happens.
 
 ## Admin geometry (B-6, part 1)
 
@@ -113,21 +150,28 @@ against a real deployment.
 
 | Fixture | Status |
 |---|---|
+| `fixtures/ms-globalml-sample.geojsonl` | Real — 5 lines from an actually-downloaded MS GlobalML tile (`RegionName=DominicanRepublic`, `quadkey=032211023`, build `2026-02-03`) |
 | `fixtures/ocha-admin{0,2,3,4}-sample.geojson`, `ocha-admin-boundaries-sample.zip` | Real properties/pcodes/names/hierarchy from an actually-downloaded OCHA COD-AB zip (one real parent→child chain: país → Provincia Duarte → Municipio Arenoso → its 3 secciones); geometries for `pais`/`provincia`/`municipio` are simplified to each real polygon's bounding box to keep fixture size small — `seccion` geometries are likewise bbox-simplified for the same reason |
+| `fixtures/open-buildings-sample.csv` | **Synthetic.** Google does not publish a stable bulk-download URL for this job to pull a real sample from (see above) — this fixture matches the real, documented column schema with plausible DR coordinates, not an actual download |
 | `fixtures/census-extract-FIXTURE.csv` | **Mixed.** National totals are real; sub-national split is arbitrary (see above) |
 
-The full OCHA COD-AB zip (~178MB across 13 layers) was downloaded during
-development to verify the real resource format and produce this fixture;
-what ships here is a small, honest trim of it (four ADM levels, one real
-parent→child chain), not the full dataset.
+Full multi-hundred-MB downloads (MS GlobalML's 18 DR tiles, Open Buildings'
+per-country shards) were not pulled in full as part of building this job —
+impractical for a sandboxed task. The fetch/stream/parse code paths in
+`src/sources/` are written against the real, verified source formats and
+were exercised against real files during development (a real MS GlobalML
+tile, a real OCHA zip); what ships in `fixtures/` is a small, honest slice of
+that verification, not the full dataset.
 
 ## Not yet built
 
-Building footprints (B-4), POI ingestion (B-5, pending the P0-1 coverage
-spike), the derived `geo.population_grid` and `geo.data_coverage_cell` jobs,
-and coverage-tier suppression are all out of this package's current scope.
+POI ingestion (B-5, pending the P0-1 coverage spike), the derived
+`geo.population_grid` and `geo.data_coverage_cell` jobs (depend on B-4/B-5/B-6
+all being loaded for real — see `SODEJA_MVP_BACKLOG.md`'s Phase 0 refinement
+#7), and coverage-tier suppression are all out of this package's current
+scope.
 
 ## Related backlog items
 
-B-6 (admin geometry + census). B-4 (footprints) and B-5 (POI) are not
-implemented here.
+B-4 (footprints), B-6 (admin geometry + census). B-5 (POI) is not implemented
+here.

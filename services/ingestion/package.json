@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "ingest:admin-areas": "node dist/cli.js admin-areas",
+    "ingest:footprints": "node dist/cli.js footprints",
     "ingest:census": "node dist/cli.js census"
   },
   "dependencies": {
