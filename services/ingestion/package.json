@@ -1,0 +1,33 @@
+{
+  "name": "@sodeja/ingestion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "ingest:admin-areas": "node dist/cli.js admin-areas",
+    "ingest:census": "node dist/cli.js census"
+  },
+  "dependencies": {
+    "@sodeja/db": "workspace:*",
+    "@sodeja/observability": "workspace:*",
+    "adm-zip": "^0.5.16",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0"
+  }
+}
