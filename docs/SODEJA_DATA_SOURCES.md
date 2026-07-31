@@ -8,7 +8,7 @@
 |---|---|---|---|
 | **Microsoft GlobalML Footprints** — **now PRIMARY** | Building footprints, DR: 18 quadkey tiles (~179MB), build date **2026-02-03**, ~1% false-positive rate | M2, M3 | **CDLA-Permissive-2.0 — no share-alike** (corrected from assumed ODbL). Fresher than Google by 2.75 years. |
 | Google Open Buildings V3 — demoted to cross-check/gap-fill | Per-building polygons + confidence + Plus Code; `DOM` confirmed in coverage, inference May 2023, confidence 0.65–1.0 | M2, M3 | VERIFIED: dual-licensed CC BY 4.0 **or** ODbL v1.0 (user's choice) — commercial use, storage, redistribution permitted |
-| Overture Maps — Places | POIs | M1, M3, M8 | VERIFIED, mixed per source: most contributors CDLA-Permissive-2.0, Foursquare Apache 2.0, AllThePlaces CC0 — all storable/commercial. **DR coverage density itself still unmeasured — see Open Items.** |
+| Overture Maps — Places | POIs | M1, M3, M8 | VERIFIED, mixed per source: most contributors CDLA-Permissive-2.0, Foursquare Apache 2.0, AllThePlaces CC0 — all storable/commercial. **DR density MEASURED 2026-07-31 (P0-1 spike, live query against the S3 dataset, not an estimate) — see P0-1 subsection below. National average is thin, but Santo Domingo/Santiago urban-core density is substantial and ~3x OSM's own POI density in the same bbox. Not yet ground-truthed against known businesses.** |
 | Overture / OSM — Buildings | Footprints | M2, M3 | VERIFIED ODbL — share-alike **does** apply to this theme specifically (per-theme licensing, not per-provider) |
 | OpenStreetMap | Roads, transit, POIs | M1, M3, M8 | **CORRECTED — worse than reported.** Building coverage re-measured at **≈5.5%** (241,265 ways vs. 4,418,619 viviendas per 2022 census), not ~7%. Cannot be a base layer. |
 | ONE Censo 2022 | Population 10,760,028; 4,418,619 viviendas | M1 | VERIFIED but **20.6% household omission** (worst in 20 years), skewed toward target markets (Santiago 26.1%, Santo Domingo 24.7%, La Altagracia 35.5%). Not on datos.gob.do; lives in **REDATAM (no API, manual extraction only)**; censos.gob.do currently down (HTTP 522). |
@@ -55,7 +55,7 @@
 | MOPC reglamento (R-023) | ✅ RESOLVED — wrong citation confirmed; correct instrument is R-007 (Decreto 284-91), scope of application still unread |
 | ONE barrio/block tables | ⚠️ PARTIAL — REDATAM has the data but no API; COD-AB substitute stops at ADM4 (distrito municipal) |
 | **Places Aggregate count persistence** | 🔴 STILL OPEN — two verification attempts failed; needs a direct answer from Google or counsel |
-| **Overture Places DR coverage** | 🔴 STILL OPEN — licensing is clear, but actual DR POI density has never been measured |
+| **Overture Places DR coverage** | ⚠️ PARTIAL — MEASURED 2026-07-31, not yet ground-truthed. Real query against the live Overture S3 dataset (see subsection below) found substantial urban-core density in Santo Domingo/Santiago; national average is thin as expected. This is a measured working signal for the B-5 fork, not a "verified sufficient" claim — no comparison against actual known DR businesses has been done yet (that's B-22's job). |
 | TSS employer contribution percentages | 🔴 STILL OPEN — Ley 87-01 primary text returned 403 on both mirrors |
 | Ley 633 primary text / actual scope of the professional reserve | 🔴 STILL OPEN — three retrieval attempts failed; needs a lawyer, not more searching |
 
@@ -69,3 +69,46 @@
 - A new corporate criminal liability regime (data-protection related offenses under a new Penal Code) is reported to take effect around August 2026 — see SODEJA_RISKS.md L5 for full detail and confidence caveats; the underlying text was reported as still in flux as of a Senate amendment on 2026-07-23, so treat specifics as provisional pending direct legal review.
 
 **Full multi-agent verification trace (per-claim source URLs, confidence levels, and reasoning) is preserved in the planning session record; ask the assistant to retrieve specific citations on request rather than duplicating the entire trace here.**
+
+## P0-1 spike — Overture Places DR coverage measurement (2026-07-31)
+
+**✅ MEASURED, not estimated.** Ran live DuckDB queries (v1.4.4, `spatial` + `httpfs` extensions) directly against the public Overture S3 dataset (`s3://overturemaps-us-west-2`, release `2026-07-22.0`, the current release as of this pass — `2026-06-17.0` is the prior one still hosted). No download of the full dataset was needed; `read_parquet` with hive partitioning queried `theme=places/type=place` remotely. Three independent counting methods, all landing within 0.5% of each other, which is the main confidence signal here:
+
+| Method | Result |
+|---|---|
+| Rough bbox (lon -72.01..-68.32, lat 17.47..19.93, per the spike template) | 89,327 |
+| `addresses[1].country = 'DO'`, full global scan, no bbox | 88,919 |
+| Tightened bbox excluding the Haiti border strip (lon -71.75..-68.32) | 88,969 |
+
+Country-code cross-tab inside the rough bbox: `DO` 88,918, `HT` 384 (Haiti border towns pulled in by the loose western edge), `PR` 21, plus single-digit noise (`HK`/`GP`/`TC`/`KY` — almost certainly mis-tagged addresses, not a bbox problem). Confirms the rough bbox from the spike template is fine to use; contamination from neighboring countries is under 0.5%.
+
+**National average density:** ~89,000 places / ~48,670 km² (DR total land area) ≈ **1.8 places/km²**. This number alone is not decision-relevant — it's dragged down by large rural/mountainous areas with near-zero POIs — but it's the honest national figure.
+
+**Urban-core density (SODEJA's actual target markets):**
+
+| Area | Bbox (approx.) | Area (km²) | Places | Density |
+|---|---|---|---|---|
+| Santo Domingo core | lon -69.97..-69.83, lat 18.43..18.53 | ~164 | 30,550 | ~186/km² |
+| Santiago core | lon -70.72..-70.60, lat 19.42..19.49 | ~98 | 6,552 | ~67/km² |
+
+These two metros are exactly where the Censo 2022 household data is most representative per the table above (Santiago 26.1%, Santo Domingo 24.7%), so this is a favorable coincidence — the areas with the best census backing also show the densest Overture coverage.
+
+**Independent OSM sanity check (as suggested in the spike brief):** ran the same Santo Domingo bbox against the public Overpass API (`shop`+`amenity`+`office`+`tourism` nodes and ways) and got **9,852** tagged features, vs. Overture's **30,550** in the identical bbox — Overture is **~3.1x** denser than raw OSM there. Given this doc's own finding that OSM building coverage in DR is only ~5.5% of the census baseline (row 13 above), this is a meaningful floor-beat: Overture is drawing from more than OSM alone (Meta/Microsoft ML-inferred places, Foursquare, AllThePlaces, OSM), and its DR urban coverage sits well above the already-known-thin OSM baseline. It does **not** tell us the ceiling — what fraction of true, currently-operating DR businesses Overture actually captures is still unknown.
+
+**Two caveats that matter for the B-5 decision and should not get lost:**
+
+1. **Confidence-score distribution is mixed, nationally:** `>=0.9`: 10,301 (11.6%); `0.7–0.9`: 27,068 (30.4%); `0.5–0.7`: 29,733 (33.4%); `<0.5`: 21,867 (24.6%). A majority of DR records sit below 0.7 confidence — whatever ingestion approach B-5 takes should treat `confidence` as a first-class filter/field, not ignore it.
+2. **The `place` theme is broader than "competitor businesses."** Top categories nationally include `restaurant` (2,637), `beauty_salon` (2,501), `landmark_and_historical_building` (2,416), `bar` (2,240), `church_cathedral` (2,155), `hotel` (2,075), `structure_and_geography` (2,068), `real_estate` (1,984) — landmarks, churches, and natural features are mixed in with actual businesses, and 3,460 records (~3.9%) have a null primary category. The raw counts above overstate density for SODEJA's specific use case (M1/M8 competitor counts); a follow-up query scoped to commercial storefront categories would tighten this before it's coded into a scoring model.
+
+### Recommendation for the B-5 fork
+
+This is a real, positive signal for the two markets SODEJA is actually launching in — not a blanket "coverage is sufficient" verdict for the whole country or every business type. I'd frame it as: **lean toward B-5 as straightforward warehouse ingestion (`geo.poi_place`) for Santo Domingo and Santiago**, carrying two explicit follow-ups rather than treating this as closed:
+
+- Ingest with `confidence` and `categories.primary` retained as queryable fields (not discarded at load time), so B-9's coverage-tier suppression (backlog item 7 in the MVP refinements) can key off them directly.
+- Do **not** extend the "sufficient" call to secondary cities/rural areas without re-running this same query there first — the national 1.8/km² average makes clear that density outside DN/Santiago is a different, much weaker picture, relevant if/when B-28 (geographic expansion) comes up.
+
+This measurement is **not a substitute for B-22's ground-truth pass** (30-50 surveyed spaces) — it establishes that Overture *has* meaningful volume in the target metros, not that the volume *matches reality*. Recommend B-22's survey protocol add an explicit "was this business present in Overture, at what confidence" check so that question gets closed with real ground truth rather than staying inferred from bulk counts.
+
+If the ground-truth pass later shows the urban-core numbers above are mostly noise (stale listings, duplicates, non-businesses), this recommendation reverses back toward the proxied-API path (`ephemeral.poi_provider_cache` + B-2a retention reaper) — that fallback schema exists for exactly this reason and should not be deleted based on this spike alone.
+
+*Method note for reproducibility: queries run via the `duckdb` npm package (v1.4.4) from a plain Node script, not the DuckDB CLI (not installed in this environment) — functionally identical, same query engine and extensions.*
