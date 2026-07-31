@@ -1,7 +1,8 @@
 # `apps/api` — SODEJA API (Modular Monolith)
 
-**Status: `providers` (B-3), `catalog` (B-11) and a minimal `projects`
-(B-11a) are implemented. Every other module below is still a placeholder.**
+**Status: `providers` (B-3), `catalog` (B-11) and `projects` (B-11a + B-7a's
+area-confirmation slice) are implemented. Every other module below is still
+a placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -18,7 +19,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | NestJS module | Product module | Notes |
 |---|---|---|
 | `auth` | — | Not built. Supabase JWT verification; RLS is the real enforcement layer. Until it lands, every route below reads `userId` from an `x-user-id` header (`src/common/current-user-id.decorator.ts`) — an explicit placeholder, not an auth boundary |
-| `projects` | — | **Implemented (B-11a), minimal.** `POST /projects` (create only — no update/delete/list) + the assumptions sub-resource. See "B-11a contract" below |
+| `projects` | — | **Implemented (B-11a + B-7a), minimal.** `POST /projects` (create only — no update/delete/list) + the assumptions sub-resource + `PUT /projects/:id/location` (the area-confirmation gate). See "B-11a contract" and "B-7a contract" below |
 | `geo` | 2, 3 | Not built. Footprint lookup, polygon validation, coverage scoring |
 | `market-study` | 1 | Not built. Population + competition counts + confidence score |
 | `catalog` | 5 | **Implemented (B-11).** `GET /business-types` — see "B-11 contract" below |
@@ -133,6 +134,32 @@ client to prompt a recompute, **not** an audit log and **not** a claim that
 those estimates were actually recomputed — B-12/B-14/B-15/B-17 own
 recomputation itself.
 
+## B-7a contract — area confirmation gate (`src/projects/`, `src/common/area-gate.ts`)
+
+**`PUT /projects/:id/location`** — body `{ areaSqm, centroidLon, centroidLat }`
+(`ConfirmProjectLocationRequestSchema`). Idempotent upsert into
+`app.project_location`; always writes `area_source = 'user_entered'` (the
+only source reachable without the map UI — B-7/B-8, not built) and
+`area_confirmed_at = now()`. `404` if the project does not exist or is not
+owned by the caller; `400` on an out-of-range lon/lat. Returns:
+
+```ts
+// ProjectLocation (@sodeja/schemas project.ts)
+{
+  projectId: string;       // uuid
+  areaSqm: number;
+  areaSource: "footprint_dataset" | "user_drawn" | "user_entered"; // always "user_entered" from this endpoint
+  areaConfirmedAt: string; // ISO datetime
+  centroidLon: number; centroidLat: number;
+  updatedAt: string;
+}
+```
+
+**The gate itself** (`src/common/area-gate.ts`'s `requireConfirmedArea`) is
+called by `capacity`, `fitout`, and `opex` before any computation: `409` if
+`app.project_location` has no row for the project or `area_confirmed_at IS
+NULL`. This is risk T1's mitigation enforced in code, not merely documented.
+
 ## Architectural rules
 
 **Cross-module calls go through service interfaces only.** No module reaches
@@ -170,4 +197,4 @@ user sees, it lives in `@sodeja/calc`.
 
 ## Related backlog items
 
-B-1, B-2, B-3, B-11, B-11a, and every other module item B-7 through B-20.
+B-1, B-2, B-3, B-7a, B-11, B-11a, and every other module item B-7 through B-20.

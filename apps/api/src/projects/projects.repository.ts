@@ -1,5 +1,5 @@
 import type { BusinessType, ParameterTable, QueryClient } from "@sodeja/rules";
-import type { Currency, Provenance, ProjectStatus } from "@sodeja/schemas";
+import type { AreaSource, Currency, Provenance, ProjectStatus } from "@sodeja/schemas";
 
 export interface ProjectRow {
   id: string;
@@ -284,6 +284,64 @@ export async function insertMaterializedAssumptions(
     if (row) results.push(mapAssumptionRow(row));
   }
   return results;
+}
+
+export interface ProjectLocationRow {
+  projectId: string;
+  areaSqm: number;
+  areaSource: AreaSource;
+  areaConfirmedAt: Date;
+  centroidLon: number;
+  centroidLat: number;
+  updatedAt: Date;
+}
+
+/**
+ * B-7a. Upserts the confirmed area + centroid for a project's site.
+ * `project_id` is the primary key on `app.project_location`, so this is a
+ * true idempotent PUT: calling it again re-confirms (new `area_confirmed_at`)
+ * rather than erroring. Always writes `area_source = 'user_entered'` — the
+ * only source reachable without the map UI (B-7/B-8, not built here).
+ * `geom` (the confirmed polygon outline) is intentionally left NULL: this
+ * slice only captures a point + area, not a drawn shape.
+ */
+export async function upsertConfirmedLocation(
+  client: QueryClient,
+  projectId: string,
+  input: { areaSqm: number; centroidLon: number; centroidLat: number },
+): Promise<ProjectLocationRow> {
+  const { rows } = await client.query<{
+    project_id: string;
+    area_sqm: string;
+    area_source: AreaSource;
+    area_confirmed_at: Date;
+    centroid_lon: string;
+    centroid_lat: string;
+    updated_at: Date;
+  }>(
+    `INSERT INTO app.project_location (project_id, centroid, area_sqm, area_source, area_confirmed_at, updated_at)
+     VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4, 'user_entered', now(), now())
+     ON CONFLICT (project_id) DO UPDATE
+       SET centroid = EXCLUDED.centroid,
+           area_sqm = EXCLUDED.area_sqm,
+           area_source = EXCLUDED.area_source,
+           area_confirmed_at = EXCLUDED.area_confirmed_at,
+           updated_at = now()
+     RETURNING project_id, area_sqm, area_source, area_confirmed_at,
+               ST_X(centroid) AS centroid_lon, ST_Y(centroid) AS centroid_lat, updated_at`,
+    [projectId, input.centroidLon, input.centroidLat, input.areaSqm],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("app.project_location upsert returned no row");
+  return {
+    projectId: row.project_id,
+    areaSqm: Number(row.area_sqm),
+    areaSource: row.area_source,
+    areaConfirmedAt: row.area_confirmed_at,
+    centroidLon: Number(row.centroid_lon),
+    centroidLat: Number(row.centroid_lat),
+    updatedAt: row.updated_at,
+  };
 }
 
 export async function updateAssumptionOverride(

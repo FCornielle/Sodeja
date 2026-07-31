@@ -182,6 +182,71 @@ describe.skipIf(!process.env.DATABASE_URL)("projects (DB-backed)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("confirms a location (B-7a), always with area_source 'user_entered'", async () => {
+    const userId = await createUser(`location-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(userId, "Restaurante Ubicacion");
+    const server = (await startApp()).getHttpServer();
+
+    const res = await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", userId)
+      .send({ areaSqm: 120.5, centroidLon: -69.9312, centroidLat: 18.4861 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.projectId).toBe(projectId);
+    expect(res.body.areaSqm).toBe(120.5);
+    expect(res.body.areaSource).toBe("user_entered");
+    expect(res.body.areaConfirmedAt).toEqual(expect.any(String));
+    expect(res.body.centroidLon).toBeCloseTo(-69.9312, 4);
+    expect(res.body.centroidLat).toBeCloseTo(18.4861, 4);
+  });
+
+  it("PUT /location is idempotent (re-confirming updates rather than erroring)", async () => {
+    const userId = await createUser(`location-reconfirm-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(userId, "Restaurante Reconfirmar");
+    const server = (await startApp()).getHttpServer();
+
+    await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", userId)
+      .send({ areaSqm: 100, centroidLon: -69.9, centroidLat: 18.4 });
+
+    const res = await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", userId)
+      .send({ areaSqm: 200, centroidLon: -69.8, centroidLat: 18.5 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.areaSqm).toBe(200);
+  });
+
+  it("404s a PUT /location for a project the caller does not own (RLS)", async () => {
+    const ownerId = await createUser(`location-owner-${crypto.randomUUID()}@example.test`);
+    const otherId = await createUser(`location-other-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(ownerId, "Restaurante Ubicacion Privada");
+    const server = (await startApp()).getHttpServer();
+
+    const res = await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", otherId)
+      .send({ areaSqm: 100, centroidLon: -69.9, centroidLat: 18.4 });
+
+    expect(res.status).toBe(404);
+  });
+
+  it("400s a PUT /location with an out-of-range latitude", async () => {
+    const userId = await createUser(`location-bad-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(userId, "Restaurante Ubicacion Invalida");
+    const server = (await startApp()).getHttpServer();
+
+    const res = await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", userId)
+      .send({ areaSqm: 100, centroidLon: -69.9, centroidLat: 95 });
+
+    expect(res.status).toBe(400);
+  });
+
   it("404s a PATCH on a key that was never materialized", async () => {
     const userId = await createUser(`missing-key-${crypto.randomUUID()}@example.test`);
     const projectId = await createProject(userId, "Restaurante Missing Key");

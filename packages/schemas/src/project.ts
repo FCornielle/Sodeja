@@ -126,3 +126,42 @@ export const BusinessTypeCatalogEntrySchema = z.object({
   parameters: z.array(ResolvedParameterSchema),
 });
 export type BusinessTypeCatalogEntry = z.infer<typeof BusinessTypeCatalogEntrySchema>;
+
+// =========================================================================
+// B-7a — area confirmation gate
+// =========================================================================
+
+/**
+ * Mirrors `app.area_source` (specs/db/schema.sql). `PUT /projects/:id/location`
+ * (the only area-confirmation endpoint this backlog slice builds) always
+ * writes `'user_entered'` — `'footprint_dataset'`/`'user_drawn'` require the
+ * map UI and footprint-confirm flow (B-7/B-8), not built here.
+ */
+export const AreaSourceSchema = z.enum(["footprint_dataset", "user_drawn", "user_entered"]);
+export type AreaSource = z.infer<typeof AreaSourceSchema>;
+
+/**
+ * `PUT /projects/:id/location` body. The narrowest possible slice of B-7a:
+ * no map, no polygon, no footprint suggestion — just an explicit,
+ * user-typed area and point location, which is enough to satisfy the
+ * `area_confirmed_at IS NULL OR area_sqm IS NOT NULL` gate that
+ * capacity/fit-out/opex all sit behind (risk T1).
+ */
+export const ConfirmProjectLocationRequestSchema = z.object({
+  areaSqm: z.number().positive(),
+  centroidLon: z.number().min(-180).max(180),
+  centroidLat: z.number().min(-90).max(90),
+});
+export type ConfirmProjectLocationRequest = z.infer<typeof ConfirmProjectLocationRequestSchema>;
+
+export const ProjectLocationSchema = z.object({
+  projectId: z.string().uuid(),
+  areaSqm: z.number().positive(),
+  areaSource: AreaSourceSchema,
+  /** Non-null once confirmed — this endpoint always sets it, so always present in the response. */
+  areaConfirmedAt: z.string().datetime(),
+  centroidLon: z.number(),
+  centroidLat: z.number(),
+  updatedAt: z.string().datetime(),
+});
+export type ProjectLocation = z.infer<typeof ProjectLocationSchema>;

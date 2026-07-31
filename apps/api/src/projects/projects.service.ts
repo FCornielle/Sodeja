@@ -4,9 +4,11 @@ import { fetchJurisdictions, fetchParameterValues, findBestParameterValue, resol
 import type {
   AssumptionOverrideRequest,
   AssumptionOverrideResponse,
+  ConfirmProjectLocationRequest,
   CreateProjectRequest,
   Project,
   ProjectAssumption,
+  ProjectLocation,
 } from "@sodeja/schemas";
 import { estimatesInvalidatedByDomain } from "./assumption-invalidation.js";
 import {
@@ -22,8 +24,10 @@ import {
   insertMaterializedAssumptions,
   insertProject,
   updateAssumptionOverride,
+  upsertConfirmedLocation,
   type MaterializedAssumption,
   type ProjectAssumptionRow,
+  type ProjectLocationRow,
   type ProjectRow,
 } from "./projects.repository.js";
 
@@ -35,6 +39,18 @@ function toProjectDto(row: ProjectRow): Project {
     jurisdictionId: row.jurisdictionId,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function toLocationDto(row: ProjectLocationRow): ProjectLocation {
+  return {
+    projectId: row.projectId,
+    areaSqm: row.areaSqm,
+    areaSource: row.areaSource,
+    areaConfirmedAt: row.areaConfirmedAt.toISOString(),
+    centroidLon: row.centroidLon,
+    centroidLat: row.centroidLat,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -100,6 +116,31 @@ export class ProjectsService {
         }
         throw error;
       }
+    });
+  }
+
+  /**
+   * B-7a. The narrowest possible slice of the area-confirmation gate:
+   * `PUT /projects/:id/location`, always `area_source = 'user_entered'`
+   * (the only source reachable without the map UI / footprint-confirm flow,
+   * B-7/B-8, not built here). Idempotent — `project_id` is the primary key
+   * on `app.project_location`, so re-calling this re-confirms rather than
+   * erroring. This is what unblocks the 409 gate enforced by
+   * `apps/api/src/common/area-gate.ts` for capacity/fit-out/opex.
+   */
+  async confirmLocation(
+    userId: string,
+    projectId: string,
+    input: ConfirmProjectLocationRequest,
+  ): Promise<ProjectLocation> {
+    return withUserSession(userId, async (client) => {
+      const core = await fetchProjectCore(client, projectId);
+      if (!core) {
+        // Same RLS-driven "not found" vs "not yours" ambiguity as getAssumptions.
+        throw new NotFoundException(`project ${projectId} not found`);
+      }
+      const row = await upsertConfirmedLocation(client, projectId, input);
+      return toLocationDto(row);
     });
   }
 
