@@ -1,6 +1,7 @@
 # `apps/api` — SODEJA API (Modular Monolith)
 
-**Status: placeholder. No implementation, no dependencies installed.**
+**Status: `providers` (B-3), `catalog` (B-11) and a minimal `projects`
+(B-11a) are implemented. Every other module below is still a placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -16,19 +17,121 @@ product modules and gives real boundaries at no runtime cost. Validation via
 
 | NestJS module | Product module | Notes |
 |---|---|---|
-| `auth` | — | Supabase JWT verification; RLS is the real enforcement layer |
-| `projects` | — | The project aggregate; owns assumptions |
-| `geo` | 2, 3 | Footprint lookup, polygon validation, coverage scoring |
-| `market-study` | 1 | Population + competition counts + confidence score |
-| `catalog` | 5 | Business types and their parameter sets |
-| `layout` | 4 | Typology ratio templates |
-| `capacity` | 6 | Thin wrapper over `@sodeja/calc` |
-| `costs` | 9, 10 | Fit-out and operating cost estimates |
-| `finance` | 7 | Financial projection; the integration point |
-| `rules` | 12 | Permit checklist evaluation |
-| `reports` | 13 | Enqueues work; does not render |
-| `legal` | — | ToS acceptance, Ley 172-13 consent, export/delete |
-| `providers` | — | Server-side proxy for all external map/POI providers |
+| `auth` | — | Not built. Supabase JWT verification; RLS is the real enforcement layer. Until it lands, every route below reads `userId` from an `x-user-id` header (`src/common/current-user-id.decorator.ts`) — an explicit placeholder, not an auth boundary |
+| `projects` | — | **Implemented (B-11a), minimal.** `POST /projects` (create only — no update/delete/list) + the assumptions sub-resource. See "B-11a contract" below |
+| `geo` | 2, 3 | Not built. Footprint lookup, polygon validation, coverage scoring |
+| `market-study` | 1 | Not built. Population + competition counts + confidence score |
+| `catalog` | 5 | **Implemented (B-11).** `GET /business-types` — see "B-11 contract" below |
+| `layout` | 4 | Not built. Typology ratio templates |
+| `capacity` | 6 | Not built (B-12, next). Thin wrapper over `@sodeja/calc` |
+| `costs` | 9, 10 | Not built (B-14/B-15, next). Fit-out and operating cost estimates |
+| `finance` | 7 | Not built (B-17). Financial projection; the integration point |
+| `rules` | 12 | Not built. Permit checklist evaluation |
+| `reports` | 13 | Not built. Enqueues work; does not render |
+| `legal` | — | Not built. ToS acceptance, Ley 172-13 consent, export/delete |
+| `providers` | — | **Implemented (B-3).** Server-side proxy for all external map/POI providers |
+
+## B-11 contract — `catalog` (`src/catalog/`)
+
+`GET /business-types` — no auth required (reference content, RLS disabled on
+`content.*`). Returns `BusinessTypeCatalogEntry[]` (`@sodeja/schemas`
+`project.ts`):
+
+```ts
+{
+  slug: string;            // e.g. "restaurante"
+  nameEs: string;
+  descriptionEs: string | null;
+  parameters: ResolvedParameter[]; // every domain='capacity' parameter_table
+                                    // that resolved for this business type,
+                                    // as of today, with NO jurisdiction
+                                    // override (national/generic ratios)
+}[]
+```
+
+`parameters` may be `[]` for a business type with no covered ratio — currently
+`salon` (see the B-11 migration,
+`packages/db/migrations/1785520000000_seed-capacity-parameters.sql`, for
+why). `ResolvedParameter` (`@sodeja/schemas` `primitives.ts`) always carries a
+`citation` and `provenance`; nothing in this response is ever a fabricated or
+unverified figure — `@sodeja/rules`' `toCitation()` throws before that could
+happen.
+
+## B-11a contract — `projects` (`src/projects/`)
+
+**`POST /projects`** — body `{ name, businessTypeId, jurisdictionId }`
+(`CreateProjectRequestSchema`). Returns `201` with a `Project`
+(`id, name, businessTypeId, jurisdictionId, status, createdAt`). `400` on a
+missing/invalid `x-user-id` or a body that fails Zod validation; `409` if
+`businessTypeId`/`jurisdictionId` do not reference an existing row.
+
+**`GET /projects/:id/assumptions`** — returns `ProjectAssumption[]`, **a bare
+array, no envelope**. One row per `app.project_assumption`. On first call
+(zero existing rows) it **materializes and persists** one row per
+`content.parameter_table` that resolves (via `@sodeja/rules`) for the
+project's `business_type_id` + `jurisdiction_id` + today's date — across
+**every domain currently seeded** (tax/labor/construction/capacity/layout/
+rent/utilities), not only `capacity`. Concretely, today that means every
+project also gets B-10's national labor rows (TSS ceilings, INFOTEP, and
+*all four* company-size minimum-wage tiers) alongside B-11's capacity ratios.
+**Which wage tier actually applies is a legal determination (Ley 488-08 dual
+criteria) that this endpoint does NOT make** — B-15 must select/filter, this
+endpoint only materializes what resolves. `404` if the project does not
+exist or is not owned by the caller (RLS makes these indistinguishable by
+design). `409` if the project has no `business_type_id` set.
+
+```ts
+// ProjectAssumption (@sodeja/schemas project.ts)
+{
+  id: number;
+  projectId: string;               // uuid
+  key: string;                     // = content.parameter_table.slug
+  labelEs: string;
+  unit: string;
+  valueLow: number; valueBase: number; valueHigh: number; // CURRENT effective value
+  currency: "DOP" | "USD" | null;
+  provenance: "usuario" | "referencia_sectorial" | "estimado";
+  defaultParameterValueId: number | null; // provenance metadata only
+  isOverridden: boolean;
+  implausibleFlag: boolean;
+  updatedAt: string; // ISO datetime
+}
+```
+
+**How a consumer (B-12/B-14/B-15) reads "the current value of assumption X
+for project Y"**: `GET /projects/:id/assumptions`, find the row with
+`key === X`, read `valueLow`/`valueBase`/`valueHigh`. Those three fields are
+**always** the current, effective value — whether or not `isOverridden` is
+true. Never re-resolve `defaultParameterValueId`; it only records where the
+original pre-fill came from.
+
+**`PATCH /projects/:id/assumptions/:key`** — body
+`{ valueLow, valueBase, valueHigh }` (`AssumptionOverrideRequestSchema`,
+`400` if `valueLow > valueBase` or `valueBase > valueHigh`). Sets
+`is_overridden = true`. Sets `implausible_flag = true` when the new
+`valueBase` falls outside the assumption's **original default's**
+`[value_low, value_high]` band (never the row's own current band, which may
+already reflect a prior override) — a warning, **never** a rejection.
+`404` if `key` was never materialized for this project (call `GET
+.../assumptions` first). Returns:
+
+```ts
+// AssumptionOverrideResponse (@sodeja/schemas project.ts)
+{
+  assumption: ProjectAssumption; // the updated row, same shape as above
+  invalidated: EstimateType[];   // subset of ["capacity_estimate",
+                                  // "fitout_estimate", "opex_estimate",
+                                  // "financial_projection"]
+}
+```
+
+`invalidated` comes from a static `domain -> estimate type[]` map
+(`src/projects/assumption-invalidation.ts`) keyed off the overridden
+assumption's `content.parameter_table.domain` — e.g. a `domain='capacity'`
+change never claims to invalidate `fitout_estimate`. It is a hint for the
+client to prompt a recompute, **not** an audit log and **not** a claim that
+those estimates were actually recomputed — B-12/B-14/B-15/B-17 own
+recomputation itself.
 
 ## Architectural rules
 
@@ -67,4 +170,4 @@ user sees, it lives in `@sodeja/calc`.
 
 ## Related backlog items
 
-B-1, B-2, B-3, and every module item B-7 through B-20.
+B-1, B-2, B-3, B-11, B-11a, and every other module item B-7 through B-20.

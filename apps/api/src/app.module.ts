@@ -1,12 +1,16 @@
 import { Module } from "@nestjs/common";
+import { CatalogModule } from "./catalog/catalog.module.js";
+import { ProjectsModule } from "./projects/projects.module.js";
 import { ProvidersModule } from "./providers/providers.module.js";
 
 /**
- * Deliberately the only module here. apps/api/README.md documents 13
- * eventual NestJS modules (auth, projects, geo, ...); each lands with the
- * backlog item that needs it. B-3's scope is exactly the providers proxy.
+ * apps/api/README.md documents 13 eventual NestJS modules (auth, geo, ...);
+ * each lands with the backlog item that needs it. B-3 added `providers`;
+ * B-11/B-11a add `catalog` (Module 5's business-type parameter catalog) and
+ * `projects` (the project aggregate's assumptions sub-resource — no full
+ * CRUD yet, see apps/api/src/projects/projects.controller.ts).
  */
 @Module({
-  imports: [ProvidersModule],
+  imports: [ProvidersModule, CatalogModule, ProjectsModule],
 })
 export class AppModule {}

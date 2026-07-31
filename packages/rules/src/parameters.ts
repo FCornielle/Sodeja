@@ -2,15 +2,18 @@ import type { ResolvedParameter } from "@sodeja/schemas";
 import { toCitation } from "./citation.js";
 import type { BusinessType, CitationRow, Jurisdiction, ParameterTable, ParameterValue } from "./types.js";
 
-export interface ResolveParameterValueInput {
+export interface FindBestParameterValueInput {
   parameterTable: ParameterTable;
   /** All values belonging to this parameter table (any jurisdiction/business type/date). */
   parameterValues: readonly ParameterValue[];
-  citationsById: ReadonlyMap<number, CitationRow>;
   asOfDate: string;
   businessType?: BusinessType;
   /** Most-specific-first, as returned by resolveJurisdictionChain. Omit to resolve jurisdiction-agnostic values only. */
   jurisdictionChain?: readonly Jurisdiction[];
+}
+
+export interface ResolveParameterValueInput extends FindBestParameterValueInput {
+  citationsById: ReadonlyMap<number, CitationRow>;
 }
 
 function isValueInForce(value: ParameterValue, asOfDate: string): boolean {
@@ -20,12 +23,15 @@ function isValueInForce(value: ParameterValue, asOfDate: string): boolean {
 }
 
 /**
- * Resolves the single best-matching `content.parameter_value` row for a
- * parameter table, given an optional business type and jurisdiction, as of a
- * date — this is the read path `@sodeja/calc` depends on for every rate it is
- * handed (README: "There are no numeric literals with business meaning in
- * this package" applies to calc; this is where those numbers actually come
- * from).
+ * The same ranking `resolveParameterValue` uses, factored out so a caller
+ * that needs the raw `content.parameter_value` row — not just the
+ * citation-bearing `ResolvedParameter` wire shape — can get it without
+ * duplicating the specificity algorithm. This is what
+ * `apps/api/src/projects` uses to populate `project_assumption.
+ * default_parameter_value_id` (B-11a): that column needs the actual row id,
+ * which `ResolvedParameter` deliberately does not carry (it is the shared
+ * B-10/B-16 wire contract with `@sodeja/calc`, defined once in
+ * `@sodeja/schemas`, and is not the place to add a DB-internal id).
  *
  * Candidates are ranked by specificity, most specific wins:
  *   1. business type: exact match beats "applies to all" (NULL)
@@ -37,9 +43,8 @@ function isValueInForce(value: ParameterValue, asOfDate: string): boolean {
  *
  * Pure: takes fully-fetched rows, performs no I/O.
  */
-export function resolveParameterValue(input: ResolveParameterValueInput): ResolvedParameter | null {
-  const { parameterTable, parameterValues, citationsById, asOfDate, businessType, jurisdictionChain } =
-    input;
+export function findBestParameterValue(input: FindBestParameterValueInput): ParameterValue | null {
+  const { parameterTable, parameterValues, asOfDate, businessType, jurisdictionChain } = input;
 
   const jurisdictionRank = new Map<number, number>(
     (jurisdictionChain ?? []).map((j, index) => [j.id, index] as const),
@@ -85,6 +90,25 @@ export function resolveParameterValue(input: ResolveParameterValueInput): Resolv
     }
   }
 
+  return best ?? null;
+}
+
+/**
+ * Resolves the single best-matching `content.parameter_value` row for a
+ * parameter table, given an optional business type and jurisdiction, as of a
+ * date — this is the read path `@sodeja/calc` depends on for every rate it is
+ * handed (README: "There are no numeric literals with business meaning in
+ * this package" applies to calc; this is where those numbers actually come
+ * from). Delegates the row selection to `findBestParameterValue` and adds the
+ * citation lookup that turns it into the shared `ResolvedParameter` shape.
+ *
+ * Pure: takes fully-fetched rows, performs no I/O.
+ */
+export function resolveParameterValue(input: ResolveParameterValueInput): ResolvedParameter | null {
+  const { parameterTable, parameterValues, citationsById, asOfDate, businessType, jurisdictionChain } =
+    input;
+
+  const best = findBestParameterValue({ parameterTable, parameterValues, asOfDate, businessType, jurisdictionChain });
   if (!best) return null;
 
   const citationRow = citationsById.get(best.citationId);
