@@ -1,0 +1,35 @@
+{
+  "engineVersion": "1.0.0",
+  "asOfDate": "2026-07-31",
+  "inputsSnapshot": {
+    "rentUsd": {
+      "pessimistic": { "amount": 1200, "currency": "USD" },
+      "base": { "amount": 1500, "currency": "USD" },
+      "optimistic": { "amount": 1800, "currency": "USD" }
+    },
+    "payrollDop": {
+      "pessimistic": { "amount": 45000, "currency": "DOP" },
+      "base": { "amount": 52000, "currency": "DOP" },
+      "optimistic": { "amount": 60000, "currency": "DOP" }
+    },
+    "fx": { "from": "USD", "to": "DOP", "rate": 60 },
+    "contingencyFactor": 1.1
+  },
+  "result": {
+    "rentDop": {
+      "pessimistic": { "amount": 72000, "currency": "DOP" },
+      "base": { "amount": 90000, "currency": "DOP" },
+      "optimistic": { "amount": 108000, "currency": "DOP" }
+    },
+    "totalFixedCostsDop": {
+      "pessimistic": { "amount": 117000, "currency": "DOP" },
+      "base": { "amount": 142000, "currency": "DOP" },
+      "optimistic": { "amount": 168000, "currency": "DOP" }
+    },
+    "withContingency": {
+      "pessimistic": { "amount": 128700, "currency": "DOP" },
+      "base": { "amount": 156200, "currency": "DOP" },
+      "optimistic": { "amount": 184800, "currency": "DOP" }
+    }
+  }
+}
