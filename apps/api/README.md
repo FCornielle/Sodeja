@@ -1,8 +1,8 @@
 # `apps/api` — SODEJA API (Modular Monolith)
 
-**Status: `providers` (B-3), `catalog` (B-11) and `projects` (B-11a + B-7a's
-area-confirmation slice) are implemented. Every other module below is still
-a placeholder.**
+**Status: `providers` (B-3), `catalog` (B-11), `projects` (B-11a + B-7a's
+area-confirmation slice) and `capacity` (B-12) are implemented. Every other
+module below is still a placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -24,7 +24,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | `market-study` | 1 | Not built. Population + competition counts + confidence score |
 | `catalog` | 5 | **Implemented (B-11).** `GET /business-types` — see "B-11 contract" below |
 | `layout` | 4 | Not built. Typology ratio templates |
-| `capacity` | 6 | Not built (B-12, next). Thin wrapper over `@sodeja/calc` |
+| `capacity` | 6 | **Implemented (B-12).** `POST /projects/:id/capacity-estimate` — see "B-12 contract" below |
 | `costs` | 9, 10 | Not built (B-14/B-15, next). Fit-out and operating cost estimates |
 | `finance` | 7 | Not built (B-17). Financial projection; the integration point |
 | `rules` | 12 | Not built. Permit checklist evaluation |
@@ -160,6 +160,25 @@ called by `capacity`, `fitout`, and `opex` before any computation: `409` if
 `app.project_location` has no row for the project or `area_confirmed_at IS
 NULL`. This is risk T1's mitigation enforced in code, not merely documented.
 
+## B-12 contract — `capacity` (`src/capacity/`)
+
+**`POST /projects/:id/capacity-estimate`** — body `{ staffCount? }`
+(`CapacityEstimateRequestSchema`). Computes AND persists a new
+`app.capacity_estimate` row (no separate `GET`; call again to recompute).
+`404` if the project does not exist/is not owned by the caller; `409` if the
+area is not confirmed (B-7a) or the project has no business type.
+
+Resolves the project's business type's `domain='capacity'` ratio (via
+`@sodeja/rules`) and divides the confirmed area by it using `@sodeja/calc`'s
+`Range` primitives — `seats_low/base/high` are `null`, with a reason string
+in `resultsJson.seatsReason`, for a business type with no seeded ratio
+(currently `salon`; this is a legitimate absence per the B-11 migration, not
+an error). `staff_low/base/high` are populated **only** from the request's
+`staffCount` — no staffing-density ratio exists to derive one from (see the
+B-11 migration's comments); omitted, `staff_*` is `null` with a reason.
+`daily_customers_*` is always `null` — no `rotación`/turnover input exists
+yet to derive it from a real basis.
+
 ## Architectural rules
 
 **Cross-module calls go through service interfaces only.** No module reaches
@@ -197,4 +216,4 @@ user sees, it lives in `@sodeja/calc`.
 
 ## Related backlog items
 
-B-1, B-2, B-3, B-7a, B-11, B-11a, and every other module item B-7 through B-20.
+B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, and every other module item B-7 through B-20.

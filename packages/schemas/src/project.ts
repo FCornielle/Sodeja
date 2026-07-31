@@ -165,3 +165,40 @@ export const ProjectLocationSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 export type ProjectLocation = z.infer<typeof ProjectLocationSchema>;
+
+// =========================================================================
+// B-12 — capacity estimate
+// =========================================================================
+
+/**
+ * `POST /projects/:id/capacity-estimate` body. `staffCount` is the ONLY way
+ * to populate `staff_*` on the stored estimate: no staffing-density ratio
+ * was seeded (packages/db/migrations/1785520000000_seed-capacity-parameters.sql
+ * deliberately left it uncovered — no genuine DR or international standard
+ * was found with real confidence), so a fabricated ratio is not an option.
+ * Omit it and `staff_*` is persisted as `null`.
+ */
+export const CapacityEstimateRequestSchema = z.object({
+  staffCount: z.number().int().nonnegative().optional(),
+});
+export type CapacityEstimateRequest = z.infer<typeof CapacityEstimateRequestSchema>;
+
+export const CapacityEstimateSchema = z.object({
+  id: z.number().int(),
+  projectId: z.string().uuid(),
+  engineVersion: z.string().min(1),
+  asOfDate: z.string(),
+  inputsSnapshot: z.record(z.string(), z.unknown()),
+  resultsJson: z.record(z.string(), z.unknown()),
+  seatsLow: z.number().int().nullable(),
+  seatsBase: z.number().int().nullable(),
+  seatsHigh: z.number().int().nullable(),
+  staffLow: z.number().int().nullable(),
+  staffBase: z.number().int().nullable(),
+  staffHigh: z.number().int().nullable(),
+  dailyCustomersLow: z.number().int().nullable(),
+  dailyCustomersBase: z.number().int().nullable(),
+  dailyCustomersHigh: z.number().int().nullable(),
+  computedAt: z.string().datetime(),
+});
+export type CapacityEstimate = z.infer<typeof CapacityEstimateSchema>;
