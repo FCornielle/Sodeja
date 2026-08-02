@@ -4,3 +4,4 @@ packages:
   - "services/*"
 allowBuilds:
   duckdb: true
+  sharp: true

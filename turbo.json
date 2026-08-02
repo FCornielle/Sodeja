@@ -8,6 +8,11 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "@sodeja/web#build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**"],
+      "env": ["NEXT_PUBLIC_API_BASE_URL"]
+    },
     "dev": {
       "cache": false,
       "persistent": true

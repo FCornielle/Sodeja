@@ -1,0 +1,71 @@
+"use client";
+
+import { useState } from "react";
+import type { ProjectLocation } from "@sodeja/schemas";
+import type { LocationDraft } from "../lib/types";
+import { ConfirmAreaStep } from "./confirm/ConfirmAreaStep";
+import { LocationStep } from "./location/LocationStep";
+
+type FlowStep = "location" | "confirm" | "done";
+
+/**
+ * B-7's scope is Steps 1-2 + Secondary Flow A only (specs/ux/flows.md).
+ * Step 3 onward (market study, business type, capacity/cost, projection,
+ * permits, export) are separate, unbuilt backlog items — reaching "done"
+ * here shows a plain placeholder rather than pretending to continue the
+ * real 9-step flow.
+ */
+export function ProjectFlow({ projectId }: { projectId: string }) {
+  const [step, setStep] = useState<FlowStep>("location");
+  const [draft, setDraft] = useState<LocationDraft | null>(null);
+  const [confirmedLocation, setConfirmedLocation] = useState<ProjectLocation | null>(null);
+
+  if (step === "confirm" && draft) {
+    return (
+      <ConfirmAreaStep
+        projectId={projectId}
+        draft={draft}
+        onBack={() => setStep("location")}
+        onConfirmed={(location) => {
+          setConfirmedLocation(location);
+          setStep("done");
+        }}
+      />
+    );
+  }
+
+  if (step === "done" && confirmedLocation) {
+    return (
+      <div className="mx-auto flex h-full max-w-lg flex-col items-center justify-center gap-3 p-6 text-center">
+        <h1 className="text-xl font-semibold text-neutral-900">Área confirmada</h1>
+        <p className="text-sm text-neutral-600">
+          {confirmedLocation.areaSqm.toFixed(0)} m² · fuente: {confirmedLocation.areaSource}
+        </p>
+        <p className="text-xs text-neutral-500">
+          Los pasos siguientes (mercado, tipo de negocio, capacidad, costos, proyección, permisos)
+          no forman parte de este cambio (B-7).
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(null);
+            setConfirmedLocation(null);
+            setStep("location");
+          }}
+          className="mt-2 rounded border border-neutral-300 px-4 py-2 text-sm"
+        >
+          Confirmar otra ubicación
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <LocationStep
+      onDraftReady={(nextDraft) => {
+        setDraft(nextDraft);
+        setStep("confirm");
+      }}
+    />
+  );
+}
