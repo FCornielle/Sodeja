@@ -1,0 +1,32 @@
+{
+  "name": "@sodeja/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "lint": "eslint app components hooks lib",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@sodeja/schemas": "workspace:*",
+    "@turf/area": "^7.3.5",
+    "@turf/centroid": "^7.3.5",
+    "@turf/helpers": "^7.3.5",
+    "@turf/kinks": "^7.3.5",
+    "maplibre-gl": "^6.1.0",
+    "next": "^16.2.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3"
+  }
+}
