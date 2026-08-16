@@ -6,12 +6,10 @@ import type { AreaSource } from "@sodeja/schemas";
  * (`ConfirmAreaStep`) before it becomes a real `PUT /projects/:id/location`
  * call.
  *
- * `areaSource` reflects the UX spec's INTENDED provenance
- * (`footprint_dataset` / `user_drawn` / `user_entered`) for on-screen
- * display only. `ConfirmAreaStep.tsx`'s doc comment explains why the value
- * actually persisted by `PUT /projects/:id/location` is always
- * `user_entered` regardless — a documented B-7a contract gap, not a bug in
- * this client.
+ * `areaSource` is how the draft was produced (`footprint_dataset` /
+ * `user_drawn` / `user_entered`). Step 2 sends it on to
+ * `PUT /projects/:id/location`, downgrading it to `user_entered` if the user
+ * edits the number there — the API never infers provenance itself.
  */
 export interface LocationDraft {
   areaSqm: number;

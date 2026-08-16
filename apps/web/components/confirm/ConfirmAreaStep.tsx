@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ProjectLocation } from "@sodeja/schemas";
+import type { AreaSource, ProjectLocation } from "@sodeja/schemas";
 import { apiFetch, ApiError } from "../../lib/apiClient";
 import { isAreaImplausible } from "../../lib/geometry";
 import type { LocationDraft } from "../../lib/types";
@@ -18,17 +18,11 @@ interface Props {
  * nothing downstream may be computed until this passes. Disclaimer copy and
  * the primary action label are VERBATIM from the spec.
  *
- * KNOWN B-7a CONTRACT GAP (documented, not silently papered over): the spec's
- * state table says an unchanged dataset suggestion should be "Recorded as
- * `footprint_dataset` + confirmed." But `PUT /projects/:id/location`
- * (apps/api/src/projects/projects.service.ts's `confirmLocation`, B-7a) ALWAYS
- * persists `area_source = 'user_entered'` server-side, regardless of what this
- * client sends — B-7a's endpoint, as built, has no other code path. This
- * component still computes and displays the spec-intended provenance chip
- * client-side (`footprint_dataset` vs `usuario`) since that distinction IS
- * determinable here, but the value actually stored in Postgres is uniformly
- * `user_entered` until B-7a's write path is extended. See this task's final
- * report for the full note.
+ * This screen is the only place the area's provenance is knowable — whether
+ * the confirmed figure is still the dataset's own footprint area, a polygon
+ * the user drew, or a number they typed — so it declares it explicitly in the
+ * `PUT /projects/:id/location` body (`areaSource`, B-8). The API never infers
+ * it; sending nothing would silently record `user_entered`.
  *
  * The optional "floors" / "usable vs total area" inputs the spec calls for
  * are captured in this form but NOT sent to the API — `ConfirmProjectLocation
@@ -46,15 +40,12 @@ export function ConfirmAreaStep({ projectId, draft, onBack, onConfirmed }: Props
   const isValidArea = areaText.trim().length > 0 && Number.isFinite(parsedArea) && parsedArea > 0;
   const implausible = isValidArea && isAreaImplausible(parsedArea);
 
-  const unchangedFromDataset =
-    draft.areaSource === "footprint_dataset" &&
-    draft.datasetSuggestedAreaSqm !== undefined &&
-    isValidArea &&
-    parsedArea === draft.datasetSuggestedAreaSqm;
-
-  // Spec-intended provenance for DISPLAY only — see the doc comment above.
-  const displayProvenance = unchangedFromDataset ? "estimado" : "usuario";
-  const displayAreaSource = unchangedFromDataset ? "footprint_dataset" : "user_entered";
+  // Editing the number makes it a typed figure whatever it started as;
+  // leaving it alone keeps what Step 1 produced (tapped footprint, drawn
+  // polygon, or an area the user already typed there).
+  const areaSource: AreaSource =
+    isValidArea && parsedArea === draft.areaSqm ? draft.areaSource : "user_entered";
+  const displayProvenance = areaSource === "footprint_dataset" ? "estimado" : "usuario";
 
   let disabledReason: string | null = null;
   if (!isValidArea) disabledReason = "Ingrese un área mayor que cero.";
@@ -71,6 +62,7 @@ export function ConfirmAreaStep({ projectId, draft, onBack, onConfirmed }: Props
           areaSqm: parsedArea,
           centroidLon: draft.centroidLon,
           centroidLat: draft.centroidLat,
+          areaSource,
         },
       });
       onConfirmed(location);
@@ -104,7 +96,7 @@ export function ConfirmAreaStep({ projectId, draft, onBack, onConfirmed }: Props
         />
         <div className="mt-1 flex gap-2 text-xs text-neutral-500">
           <span className="rounded bg-neutral-100 px-2 py-0.5">{displayProvenance}</span>
-          <span>fuente: {displayAreaSource}</span>
+          <span>fuente: {areaSource}</span>
         </div>
       </div>
 

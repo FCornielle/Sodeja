@@ -4,16 +4,19 @@ import { useState } from "react";
 import type { ProjectLocation } from "@sodeja/schemas";
 import type { LocationDraft } from "../lib/types";
 import { ConfirmAreaStep } from "./confirm/ConfirmAreaStep";
+import { PoiLabelStep } from "./confirm/PoiLabelStep";
 import { LocationStep } from "./location/LocationStep";
 
-type FlowStep = "location" | "confirm" | "done";
+type FlowStep = "location" | "confirm" | "poi-label" | "done";
 
 /**
- * B-7's scope is Steps 1-2 + Secondary Flow A only (specs/ux/flows.md).
- * Step 3 onward (market study, business type, capacity/cost, projection,
- * permits, export) are separate, unbuilt backlog items — reaching "done"
- * here shows a plain placeholder rather than pretending to continue the
- * real 9-step flow.
+ * Steps 1-2 + Secondary Flow A (specs/ux/flows.md, B-7), plus B-8's POI
+ * use-label immediately after the area gate passes — `GET /projects/:id/
+ * poi-label` is gated behind that confirmation, so it cannot be asked
+ * earlier. Step 3 onward (market study, business type, capacity/cost,
+ * projection, permits, export) are separate, unbuilt backlog items —
+ * reaching "done" here shows a plain placeholder rather than pretending to
+ * continue the real 9-step flow.
  */
 export function ProjectFlow({ projectId }: { projectId: string }) {
   const [step, setStep] = useState<FlowStep>("location");
@@ -28,8 +31,18 @@ export function ProjectFlow({ projectId }: { projectId: string }) {
         onBack={() => setStep("location")}
         onConfirmed={(location) => {
           setConfirmedLocation(location);
-          setStep("done");
+          setStep("poi-label");
         }}
+      />
+    );
+  }
+
+  if (step === "poi-label") {
+    return (
+      <PoiLabelStep
+        projectId={projectId}
+        onContinue={() => setStep("done")}
+        onBackToConfirm={() => setStep("confirm")}
       />
     );
   }
