@@ -17,6 +17,7 @@
     "@sodeja/calc": "workspace:*",
     "@sodeja/db": "workspace:*",
     "@sodeja/observability": "workspace:*",
+    "@sodeja/pdf-worker": "workspace:*",
     "@sodeja/providers": "workspace:*",
     "@sodeja/rules": "workspace:*",
     "@sodeja/schemas": "workspace:*",

@@ -10,6 +10,7 @@ import { MarketStudyModule } from "./market-study/market-study.module.js";
 import { PermitsModule } from "./permits/permits.module.js";
 import { ProjectsModule } from "./projects/projects.module.js";
 import { ProvidersModule } from "./providers/providers.module.js";
+import { ReportsModule } from "./reports/reports.module.js";
 
 /**
  * apps/api/README.md documents 13 eventual NestJS modules (auth, geo, ...);
@@ -27,7 +28,9 @@ import { ProvidersModule } from "./providers/providers.module.js";
  * (Module 12 — a read-only checklist over B-10's rule interpreter; the
  * README's placeholder name for it was `rules`); B-20 adds `legal` (a
  * read-only slice: just the current disclaimer document, see the "B-20
- * contract" README section for what is deliberately not built).
+ * contract" README section for what is deliberately not built); B-19 adds
+ * `reports` (Module 13 — the integration point that assembles every
+ * upstream module into a downloadable PDF via `@sodeja/pdf-worker`).
  */
 @Module({
   imports: [
@@ -42,6 +45,7 @@ import { ProvidersModule } from "./providers/providers.module.js";
     MarketStudyModule,
     PermitsModule,
     LegalModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}

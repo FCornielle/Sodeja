@@ -4,8 +4,8 @@
 area-confirmation slice), `capacity` (B-12), `costs` (B-14 fit-out +
 B-15 opex), `finance` (B-17), `geo` (B-7's read-only slice),
 `market-study` (B-9), `layout` (B-13's read-only parameter slice), `permits`
-(B-18) and `legal` (B-20's minimal slice) are implemented. Every other
-module below is still a placeholder.**
+(B-18), `legal` (B-20's minimal slice) and `reports` (B-19) are implemented.
+Every other module below is still a placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -31,7 +31,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | `costs` | 9, 10 | **Implemented (B-14 + B-15).** `POST /projects/:id/fitout-estimate`, `POST /projects/:id/opex-estimate` — see "B-14/B-15 contract" below |
 | `finance` | 7 | **Implemented (B-17).** `POST /projects/:id/financial-projection` — the integration point. See "B-17 contract" below |
 | `permits` | 12 | **Implemented (B-18), read-only.** `GET /projects/:id/permits-checklist` — see "B-18 contract" below. Named `rules` in earlier drafts of this table; the NestJS module is `permits`, since `@sodeja/rules` is the package it calls into |
-| `reports` | 13 | Not built. Enqueues work; does not render |
+| `reports` | 13 | **Implemented (B-19).** `POST /projects/:id/reports`, `GET /projects/:id/reports`, `GET /projects/:id/reports/:reportId`, `GET /projects/:id/reports/:reportId/download` — see "B-19 contract" below |
 | `legal` | — | **Implemented (B-20's minimal slice), read-only.** `GET /legal/documents/:kind/current` — see "B-20 contract" below. ToS acceptance tracking, Ley 172-13 consent, and export/delete are deliberately NOT built (need the login flow, UX spec Step 0, which does not exist yet) |
 | `providers` | — | **Implemented (B-3).** Server-side proxy for all external map/POI providers |
 
@@ -549,6 +549,141 @@ WITHOUT citing any DR law and WITHOUT claiming legal review took place
 (P0-4, "Engage DR contador + lawyer," is still open — see the migration's
 own header for the full reasoning). It exists to satisfy B-19's schema
 constraint honestly, not to substitute for real legal review.
+
+## B-19 contract — `reports` (`src/reports/`)
+
+Module 13, the report/export integration point
+(services/pdf-worker/README.md). Renders every upstream module's latest
+stored figures, plus the B-20 disclaimer, into a PDF via
+`@sodeja/pdf-worker` (React SSR -> Playwright -> PDF). B-19 hard-depends on
+B-20 (docs/SODEJA_MVP_BACKLOG.md Phase 0 refinements item 2): `app.report`'s
+own CHECK constraint (`status <> 'ready' OR (storage_key IS NOT NULL AND
+disclaimer_document_id IS NOT NULL)`) makes this true at the schema level,
+not just by convention.
+
+**`POST /projects/:id/reports`** — body `{ tier? }`
+(`CreateReportRequestSchema`, default `'resumen_analisis'`). `202` with the
+new `app.report` row (`status: 'queued'`) — the render always runs
+asynchronously, never on the request path (services/pdf-worker/README.md:
+"the request path never blocks on Chromium"). `400` if `tier ===
+'plan_negocio'` — Phase 1 ships only `resumen_analisis`; a request for the
+Phase 2/B-26 bank-facing tier is rejected outright rather than silently
+downgraded, so a caller that explicitly asked for it learns it does not
+exist rather than receiving a different document than requested.
+
+**Prerequisite gate — only a CONFIRMED AREA (B-7a) is hard-blocking
+(`409`).** Every other upstream estimate (market-study, capacity, layout,
+fit-out, opex, financial-projection, permits) is read best-effort and
+gracefully degrades to a "no calculado aún" section in the rendered PDF
+instead of blocking generation entirely. This judgment call follows directly
+from those modules' OWN designs: `market-study` (B-9) can legitimately
+report `confidence: 'insuficiente'`, and `layout` (B-13) has no
+server-persisted zone split at all (the actual zone breakdown a user chose
+is computed and kept client-side in `@sodeja/calc`, never sent back to the
+server — so the report's layout section can only show the density
+reference parameters, not the chosen zone split, and says so explicitly).
+Making the report stricter than the modules that feed it would contradict
+their own product design; a report with fewer computed sections is still a
+real, honest artifact as long as every gap is visible and labeled, which is
+exactly what the README's "Mandatory content on every export" list (the
+assumptions appendix, provenance tags, "no calculado aún" sections) exists
+to guarantee.
+
+**`GET /projects/:id/reports`** / **`GET /projects/:id/reports/:reportId`**
+— status polling (UX spec Secondary Flow C: "the user may navigate away;
+the report appears in a list and notifies on completion" — this MVP slice
+has no push notification, only polling). `404` if the report does not exist
+or is not the caller's.
+
+**`GET /projects/:id/reports/:reportId/download`** — `404` if the report
+does not exist or is not the caller's; `409` if it exists but `status !==
+'ready'`. Returns the PDF bytes directly (`Content-Type:
+application/pdf`), not a redirect to a signed URL: `services/pdf-worker`'s
+`FilesystemReportStorage` (storage.ts) is local-disk-backed, and a real
+time-limited, unguessable signed URL is not a meaningful concept without a
+separate object-storage service to issue one against. This endpoint is
+protected the same way every other project-scoped route is (the
+`x-user-id` header + RLS ownership check on `app.report`), which is an
+honest simplification appropriate to local/free storage — NOT a substitute
+security feature. A real `STORAGE_DRIVER=gcs` (or similar) implementation
+would need genuine signed-URL issuance behind the same `ReportStorage`
+interface (`@sodeja/pdf-worker`'s types.ts).
+
+**The render job** (`reports.service.ts`'s `renderReportJob`, private,
+dispatched by an in-memory queue — see below) gathers, in its own
+`withUserSession` scope(s):
+
+- `app.project` + `content.business_type`/`content.jurisdiction` (name,
+  jurisdiction, reporting currency) and the confirmed `app.project_location`
+  — own queries, same "each module owns its own reads" posture as
+  `finance.repository.ts`/`permits.repository.ts`.
+- The LATEST row of `app.market_study`, `app.capacity_estimate`,
+  `app.fitout_estimate`, `app.opex_estimate`, `app.financial_projection` —
+  read-only, exactly the discipline `finance.service.ts` established
+  ("reads the latest stored estimate, never recomputes").
+- `layout` and `permits` sections come from a REAL cross-module service call
+  (`LayoutService.getLayoutParameters` / `PermitsService.getPermitsChecklist`,
+  injected via `LayoutModule`/`PermitsModule` now exporting those services)
+  rather than a duplicated query, because both modules COMPUTE something
+  (parameter resolution / rule evaluation) that must not be
+  reimplemented a second time (apps/api/README.md "Architectural rules:
+  Cross-module calls go through service interfaces only"). Each call is
+  wrapped in a try/catch that turns a thrown `409`/`404` into a graceful
+  `{ available: false, reason }` section rather than failing the whole
+  report.
+- Every `app.project_assumption` row — the assumptions appendix, always
+  present (possibly empty), every row provenance-tagged.
+- The current B-20 disclaimer (`LegalService.getCurrentDocument`), rendered
+  in FULL inside the PDF body, not just referenced by id.
+
+On success: `status='ready'`, `storage_key`, `disclaimer_document_id`,
+`engine_version` (`@sodeja/calc`'s `ENGINE_VERSION`), and
+`financial_projection_id` (if a projection existed) are all set in one
+update. On ANY failure (a thrown error anywhere in gathering or rendering):
+`status='failed'`, `failure_reason` set to the error message (truncated),
+`completed_at` set — never left at `'rendering'` forever. `markRendering`
+is set before any of the above starts, so polling clients see the
+transition.
+
+**Queue**: `@sodeja/pdf-worker`'s `InMemoryReportQueue` — a genuine
+in-process, single-worker FIFO queue, not a `services/pdf-worker` process
+talking to Redis/BullMQ (none is provisioned anywhere in this codebase;
+`CACHE_DRIVER` defaults to `memory`, matching the free/local posture).
+`POST /projects/:id/reports` enqueues a closure and returns `202`
+immediately; the closure runs later, in the same Node process, one report
+at a time (bounding Chromium's memory footprint to a single instance).
+Known limitations, and what a real BullMQ+Redis migration would need to
+change, are documented at length in `services/pdf-worker/src/queue.ts`'s
+header: no persistence (a process restart loses queued/in-flight jobs
+silently), no automatic retries, and no cross-process fan-out (this is
+`services/pdf-worker` as a LIBRARY apps/api imports, not the separate
+deployable the top-level README describes — the `ReportQueue` interface is
+shaped so that swap only touches `queue.ts` and `reports.module.ts`'s
+provider wiring).
+
+**Storage**: `@sodeja/pdf-worker`'s `FilesystemReportStorage` — writes under
+`REPORTS_STORAGE_DIR` (`.env.example`, default `./data/reports`), keyed
+`${projectId}/${reportId}.pdf`. `packages/providers` has no object-storage
+adapter yet, so this is genuinely new, scoped to `services/pdf-worker`
+since nothing else needs it today.
+
+**Mandatory PDF content** (services/pdf-worker/README.md, all present in
+every render): the B-20 disclaimer in full and non-dismissible;
+`engine_version` and (where the permits section is available) each item's
+`rulePackVersion`; a generation timestamp and every figure's own
+`asOfDate`/`computedAt`; the full assumptions appendix with every
+provenance tag; ranges throughout (never a bare point figure); citation/
+source attribution on every cited parameter and permit item; and a
+per-page watermark footer ("SODEJA — RESUMEN DE ANÁLISIS, NO ES PLAN DE
+NEGOCIO") rendered via Playwright's own `displayHeaderFooter`/
+`footerTemplate` mechanism (repeats on every page — a CSS `position: fixed`
+element does not reliably repeat across Chromium print pages, so this is
+the correct mechanism, not a simplification).
+
+`app.permit_checklist_item` and any server-persisted zone-allocation table
+are NOT read by this module for the same reasons `permits`/`layout`
+themselves don't populate/need them — see those modules' own contract
+sections.
 
 ## Architectural rules
 
