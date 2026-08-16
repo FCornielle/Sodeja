@@ -9,6 +9,25 @@ import { ProjectsModule } from "./projects.module.js";
 // Integration tests against a real Postgres, same pattern as
 // packages/db/src/schema.test.ts: skipped (not failed) without DATABASE_URL.
 // Requires the B-2/B-10/B-11 migrations applied.
+// B-8 POI-label fixtures. `geo.poi_place` rows are inserted directly here,
+// mirroring what services/ingestion's B-5 job would produce — this suite does
+// not depend on that job having been run.
+const POI_TEST_SOURCE = "test-fixture-b8-poi-label";
+
+// A site with POIs around it, well away from every other suite's fixture
+// geometry (market-study.controller.test.ts uses -69.91/18.46 and -68.5/19.9).
+const POI_SITE_LON = -69.95;
+const POI_SITE_LAT = 18.5;
+
+// 1 degree of longitude is ~105,570m at 18.5°N, so these are ~15m and ~30m
+// east of the site — both inside POI_LABEL_RADIUS_M (40m).
+const DEG_PER_M_LON = 1 / 105_570;
+const NEAR_POI_LON = POI_SITE_LON + 15 * DEG_PER_M_LON;
+const FARTHER_POI_LON = POI_SITE_LON + 30 * DEG_PER_M_LON;
+
+// ~200m east of the site: outside the radius, so it must never be returned.
+const OUT_OF_RANGE_POI_LON = POI_SITE_LON + 200 * DEG_PER_M_LON;
+
 describe.skipIf(!process.env.DATABASE_URL)("projects (DB-backed)", () => {
   let app: INestApplication | undefined;
   let restauranteId: number;
@@ -37,6 +56,26 @@ describe.skipIf(!process.env.DATABASE_URL)("projects (DB-backed)", () => {
     });
     restauranteId = ids.businessTypeId;
     distritoNacionalId = ids.jurisdictionId;
+
+    await withServiceSession(async (client) => {
+      await client.query(
+        `INSERT INTO geo.poi_place (external_id, name, category, raw_category, geom, source, source_license, source_vintage)
+         VALUES
+           ($1, 'Colmado Cercano', 'colmado', 'convenience_store', ST_SetSRID(ST_MakePoint($4, $7), 4326), $8, 'CC0', '2026-01-15'),
+           ($2, 'Restaurante Mas Lejos', 'restaurante', 'restaurant', ST_SetSRID(ST_MakePoint($5, $7), 4326), $8, 'CC0', '2026-01-15'),
+           ($3, 'Farmacia Fuera De Rango', NULL, 'pharmacy', ST_SetSRID(ST_MakePoint($6, $7), 4326), $8, 'CC0', '2026-01-15')`,
+        [
+          `${POI_TEST_SOURCE}-near`,
+          `${POI_TEST_SOURCE}-farther`,
+          `${POI_TEST_SOURCE}-out-of-range`,
+          NEAR_POI_LON,
+          FARTHER_POI_LON,
+          OUT_OF_RANGE_POI_LON,
+          POI_SITE_LAT,
+          POI_TEST_SOURCE,
+        ],
+      );
+    });
   });
 
   afterEach(async () => {
@@ -45,6 +84,9 @@ describe.skipIf(!process.env.DATABASE_URL)("projects (DB-backed)", () => {
   });
 
   afterAll(async () => {
+    await withServiceSession(async (client) => {
+      await client.query("DELETE FROM geo.poi_place WHERE source = $1", [POI_TEST_SOURCE]);
+    });
     await closePool();
   });
 
@@ -182,7 +224,7 @@ describe.skipIf(!process.env.DATABASE_URL)("projects (DB-backed)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("confirms a location (B-7a), always with area_source 'user_entered'", async () => {
+  it("confirms a location (B-7a), defaulting area_source to 'user_entered' when none is sent", async () => {
     const userId = await createUser(`location-${crypto.randomUUID()}@example.test`);
     const projectId = await createProject(userId, "Restaurante Ubicacion");
     const server = (await startApp()).getHttpServer();
@@ -199,6 +241,58 @@ describe.skipIf(!process.env.DATABASE_URL)("projects (DB-backed)", () => {
     expect(res.body.areaConfirmedAt).toEqual(expect.any(String));
     expect(res.body.centroidLon).toBeCloseTo(-69.9312, 4);
     expect(res.body.centroidLat).toBeCloseTo(18.4861, 4);
+  });
+
+  it("persists and round-trips an explicit area_source (B-8), not the default", async () => {
+    const userId = await createUser(`location-source-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(userId, "Restaurante Huella");
+    const server = (await startApp()).getHttpServer();
+
+    const res = await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", userId)
+      .send({
+        areaSqm: 88,
+        centroidLon: -69.9312,
+        centroidLat: 18.4861,
+        areaSource: "footprint_dataset",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.areaSource).toBe("footprint_dataset");
+
+    // It reached app.project_location, not just the response DTO.
+    const stored = await withServiceSession(async (client) => {
+      const { rows } = await client.query<{ area_source: string }>(
+        "SELECT area_source FROM app.project_location WHERE project_id = $1",
+        [projectId],
+      );
+      return rows[0]?.area_source;
+    });
+    expect(stored).toBe("footprint_dataset");
+
+    // Re-confirming with a redrawn area overwrites the provenance too — a
+    // stale 'footprint_dataset' on a hand-drawn area would misreport where
+    // the number came from.
+    const redrawn = await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", userId)
+      .send({ areaSqm: 95, centroidLon: -69.9312, centroidLat: 18.4861, areaSource: "user_drawn" });
+    expect(redrawn.status).toBe(200);
+    expect(redrawn.body.areaSource).toBe("user_drawn");
+  });
+
+  it("400s a PUT /location with an area_source outside the enum", async () => {
+    const userId = await createUser(`location-bad-source-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(userId, "Restaurante Fuente Invalida");
+    const server = (await startApp()).getHttpServer();
+
+    const res = await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", userId)
+      .send({ areaSqm: 100, centroidLon: -69.9, centroidLat: 18.4, areaSource: "guessed" });
+
+    expect(res.status).toBe(400);
   });
 
   it("PUT /location is idempotent (re-confirming updates rather than erroring)", async () => {
@@ -245,6 +339,72 @@ describe.skipIf(!process.env.DATABASE_URL)("projects (DB-backed)", () => {
       .send({ areaSqm: 100, centroidLon: -69.9, centroidLat: 95 });
 
     expect(res.status).toBe(400);
+  });
+
+  it("409s GET /poi-label before the area is confirmed (B-7a gate)", async () => {
+    const userId = await createUser(`poi-no-area-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(userId, "Restaurante Sin Area POI");
+    const server = (await startApp()).getHttpServer();
+
+    const res = await request(server).get(`/projects/${projectId}/poi-label`).set("x-user-id", userId);
+
+    expect(res.status).toBe(409);
+  });
+
+  it("returns the NEAREST POI's use-label for a confirmed site (B-8)", async () => {
+    const userId = await createUser(`poi-label-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(userId, "Restaurante Con Etiqueta");
+    const server = (await startApp()).getHttpServer();
+
+    await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", userId)
+      .send({ areaSqm: 100, centroidLon: POI_SITE_LON, centroidLat: POI_SITE_LAT });
+
+    const res = await request(server).get(`/projects/${projectId}/poi-label`).set("x-user-id", userId);
+
+    expect(res.status).toBe(200);
+    // The colmado at ~15m wins over the restaurante at ~30m — both are inside
+    // the radius, so this proves nearest-one ordering, not just presence.
+    expect(res.body.category).toBe("colmado");
+    expect(res.body.name).toBe("Colmado Cercano");
+    expect(res.body.distanceM).toBeGreaterThan(0);
+    expect(res.body.distanceM).toBeLessThan(25);
+    expect(res.body.sourceVintage).toBe("2026-01-15");
+  });
+
+  it("returns all-null (not a 404) when no POI is within the label radius", async () => {
+    const userId = await createUser(`poi-empty-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(userId, "Restaurante Sin POI");
+    const server = (await startApp()).getHttpServer();
+
+    // ~200m east of the fixture site: the out-of-range farmacia is the only
+    // POI anywhere near, and it sits outside the 40m radius from here.
+    await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", userId)
+      .send({ areaSqm: 100, centroidLon: POI_SITE_LON + 400 * DEG_PER_M_LON, centroidLat: POI_SITE_LAT });
+
+    const res = await request(server).get(`/projects/${projectId}/poi-label`).set("x-user-id", userId);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ category: null, name: null, distanceM: null, sourceVintage: null });
+  });
+
+  it("404s GET /poi-label for a project the caller does not own (RLS)", async () => {
+    const ownerId = await createUser(`poi-owner-${crypto.randomUUID()}@example.test`);
+    const otherId = await createUser(`poi-other-${crypto.randomUUID()}@example.test`);
+    const projectId = await createProject(ownerId, "Restaurante POI Privado");
+    const server = (await startApp()).getHttpServer();
+
+    await request(server)
+      .put(`/projects/${projectId}/location`)
+      .set("x-user-id", ownerId)
+      .send({ areaSqm: 100, centroidLon: POI_SITE_LON, centroidLat: POI_SITE_LAT });
+
+    const res = await request(server).get(`/projects/${projectId}/poi-label`).set("x-user-id", otherId);
+
+    expect(res.status).toBe(404);
   });
 
   it("404s a PATCH on a key that was never materialized", async () => {

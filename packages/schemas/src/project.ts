@@ -132,25 +132,28 @@ export type BusinessTypeCatalogEntry = z.infer<typeof BusinessTypeCatalogEntrySc
 // =========================================================================
 
 /**
- * Mirrors `app.area_source` (specs/db/schema.sql). `PUT /projects/:id/location`
- * (the only area-confirmation endpoint this backlog slice builds) always
- * writes `'user_entered'` — `'footprint_dataset'`/`'user_drawn'` require the
- * map UI and footprint-confirm flow (B-7/B-8), not built here.
+ * Mirrors `app.area_source` (specs/db/schema.sql). Which value applies is a
+ * decision only the caller can make — it records whether the confirmed area
+ * came from the footprint dataset untouched, from a polygon the user drew,
+ * or from a number they typed. The API never infers it (B-8).
  */
 export const AreaSourceSchema = z.enum(["footprint_dataset", "user_drawn", "user_entered"]);
 export type AreaSource = z.infer<typeof AreaSourceSchema>;
 
 /**
- * `PUT /projects/:id/location` body. The narrowest possible slice of B-7a:
- * no map, no polygon, no footprint suggestion — just an explicit,
- * user-typed area and point location, which is enough to satisfy the
- * `area_confirmed_at IS NULL OR area_sqm IS NOT NULL` gate that
- * capacity/fit-out/opex all sit behind (risk T1).
+ * `PUT /projects/:id/location` body. B-7a introduced this with area + point
+ * only; B-8 adds `areaSource`, the provenance the map UI already computes
+ * (whether the confirmed figure is still the dataset's own footprint area or
+ * the user changed it). Optional, defaulting server-side to `'user_entered'`
+ * — the pre-B-8 callers that predate the map UI genuinely only ever had a
+ * typed number, so that default states what actually happened rather than
+ * being a placeholder.
  */
 export const ConfirmProjectLocationRequestSchema = z.object({
   areaSqm: z.number().positive(),
   centroidLon: z.number().min(-180).max(180),
   centroidLat: z.number().min(-90).max(90),
+  areaSource: AreaSourceSchema.optional(),
 });
 export type ConfirmProjectLocationRequest = z.infer<typeof ConfirmProjectLocationRequestSchema>;
 
@@ -165,6 +168,38 @@ export const ProjectLocationSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 export type ProjectLocation = z.infer<typeof ProjectLocationSchema>;
+
+// =========================================================================
+// B-8 — POI use-label at the confirmed site
+// =========================================================================
+
+/**
+ * `GET /projects/:id/poi-label` — the nearest `geo.poi_place` to the
+ * project's confirmed centroid, so the UI can ask "there is currently a
+ * [category] here, is that right?".
+ *
+ * All three fields are `null` together when no POI falls within the lookup
+ * radius. That is a valid, common answer ("we don't know what is here"), not
+ * an error — the endpoint never 404s for it, and a client must render it as
+ * "no record", never as an empty/unknown category label.
+ *
+ * `category` is `geo.poi_place.category`, already normalized to a
+ * `content.business_type.slug` at ingest time
+ * (`services/ingestion/src/transform/poiPlaceRow.ts`'s `mapOvertureCategory`).
+ * It is nullable independently of `name`: Overture reports plenty of places
+ * whose raw category maps to no business type this product models, and those
+ * rows are kept (never dropped at ingest), so "there is a named place here
+ * but we can't classify it" is a real state.
+ */
+export const ProjectPoiLabelSchema = z.object({
+  category: z.string().nullable(),
+  name: z.string().nullable(),
+  /** Meters from the confirmed centroid to the POI point. Null only when no POI was found. */
+  distanceM: z.number().nonnegative().nullable(),
+  /** `geo.poi_place.source_vintage` as an ISO date — how old the record is. Null when no POI was found. */
+  sourceVintage: z.string().nullable(),
+});
+export type ProjectPoiLabel = z.infer<typeof ProjectPoiLabelSchema>;
 
 // =========================================================================
 // B-12 — capacity estimate

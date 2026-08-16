@@ -10,6 +10,7 @@ import {
   type Project,
   type ProjectAssumption,
   type ProjectLocation,
+  type ProjectPoiLabel,
 } from "@sodeja/schemas";
 import { CurrentUserId } from "../common/current-user-id.decorator.js";
 import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
@@ -20,10 +21,13 @@ import { ProjectsService } from "./projects.service.js";
  * apps/api/README.md for the exact wire contract:
  *
  * - `PUT /projects/:id/location` -> `ProjectLocation` (B-7a). Body
- *   `{ areaSqm, centroidLon, centroidLat }`. Always writes
- *   `area_source = 'user_entered'` and `area_confirmed_at = now()` — this is
- *   the gate capacity/fit-out/opex enforce as a `409` when absent (see
- *   `apps/api/src/common/area-gate.ts`).
+ *   `{ areaSqm, centroidLon, centroidLat, areaSource? }`. Writes the
+ *   caller's `areaSource` (B-8), defaulting to `'user_entered'` when absent,
+ *   and `area_confirmed_at = now()` — this is the gate capacity/fit-out/opex
+ *   enforce as a `409` when absent (see `apps/api/src/common/area-gate.ts`).
+ * - `GET /projects/:id/poi-label` -> `ProjectPoiLabel` (B-8). The nearest
+ *   known POI to the confirmed site. All-`null` when nothing is nearby —
+ *   a valid answer, never a `404`. `409` behind the same area gate.
  * - `GET /projects/:id/assumptions` -> `ProjectAssumption[]` (a bare array,
  *   no envelope). First read materializes it if empty; every field is
  *   already the CURRENT effective value — read valueLow/valueBase/valueHigh
@@ -52,6 +56,14 @@ export class ProjectsController {
     @Body(new ZodValidationPipe(ConfirmProjectLocationRequestSchema)) body: ConfirmProjectLocationRequest,
   ): Promise<ProjectLocation> {
     return this.projectsService.confirmLocation(userId, projectId, body);
+  }
+
+  @Get(":id/poi-label")
+  async getPoiLabel(
+    @CurrentUserId() userId: string,
+    @Param("id", new ParseUUIDPipe()) projectId: string,
+  ): Promise<ProjectPoiLabel> {
+    return this.projectsService.getPoiLabel(userId, projectId);
   }
 
   @Get(":id/assumptions")

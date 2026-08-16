@@ -300,15 +300,21 @@ export interface ProjectLocationRow {
  * B-7a. Upserts the confirmed area + centroid for a project's site.
  * `project_id` is the primary key on `app.project_location`, so this is a
  * true idempotent PUT: calling it again re-confirms (new `area_confirmed_at`)
- * rather than erroring. Always writes `area_source = 'user_entered'` — the
- * only source reachable without the map UI (B-7/B-8, not built here).
- * `geom` (the confirmed polygon outline) is intentionally left NULL: this
- * slice only captures a point + area, not a drawn shape.
+ * rather than erroring. `geom` (the confirmed polygon outline) is
+ * intentionally left NULL: this endpoint captures a point + area, not a
+ * drawn shape.
+ *
+ * `area_source` is whatever the caller declared, defaulting to
+ * `'user_entered'` when they declared nothing (B-8 — before the map UI
+ * existed, a typed number was the only thing this endpoint could receive, so
+ * that default records what genuinely happened). It is never inferred from
+ * the numbers: whether an area still matches the footprint dataset is
+ * something only the client that showed the user that footprint can know.
  */
 export async function upsertConfirmedLocation(
   client: QueryClient,
   projectId: string,
-  input: { areaSqm: number; centroidLon: number; centroidLat: number },
+  input: { areaSqm: number; centroidLon: number; centroidLat: number; areaSource?: AreaSource },
 ): Promise<ProjectLocationRow> {
   const { rows } = await client.query<{
     project_id: string;
@@ -320,7 +326,7 @@ export async function upsertConfirmedLocation(
     updated_at: Date;
   }>(
     `INSERT INTO app.project_location (project_id, centroid, area_sqm, area_source, area_confirmed_at, updated_at)
-     VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4, 'user_entered', now(), now())
+     VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4, $5, now(), now())
      ON CONFLICT (project_id) DO UPDATE
        SET centroid = EXCLUDED.centroid,
            area_sqm = EXCLUDED.area_sqm,
@@ -329,7 +335,7 @@ export async function upsertConfirmedLocation(
            updated_at = now()
      RETURNING project_id, area_sqm, area_source, area_confirmed_at,
                ST_X(centroid) AS centroid_lon, ST_Y(centroid) AS centroid_lat, updated_at`,
-    [projectId, input.centroidLon, input.centroidLat, input.areaSqm],
+    [projectId, input.centroidLon, input.centroidLat, input.areaSqm, input.areaSource ?? "user_entered"],
   );
   const row = rows[0];
   if (!row) throw new Error("app.project_location upsert returned no row");
@@ -341,6 +347,79 @@ export async function upsertConfirmedLocation(
     centroidLon: Number(row.centroid_lon),
     centroidLat: Number(row.centroid_lat),
     updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * B-8's own minimal centroid read — duplicated rather than imported from
+ * `market-study.repository.ts`, whose doc comment explains the same
+ * "each module owns its own minimal reads against shared tables" posture.
+ * `../common/area-gate.ts` only returns `area_sqm`; the POI lookup needs the
+ * point.
+ */
+export async function fetchConfirmedCentroid(
+  client: QueryClient,
+  projectId: string,
+): Promise<{ lon: number; lat: number } | null> {
+  const { rows } = await client.query<{ lon: number; lat: number }>(
+    `SELECT ST_X(centroid) AS lon, ST_Y(centroid) AS lat
+       FROM app.project_location
+      WHERE project_id = $1 AND area_confirmed_at IS NOT NULL`,
+    [projectId],
+  );
+  const row = rows[0];
+  return row ? { lon: row.lon, lat: row.lat } : null;
+}
+
+export interface NearestPoiRow {
+  category: string | null;
+  name: string | null;
+  distanceM: number;
+  sourceVintage: string;
+}
+
+/**
+ * B-8. The single nearest `geo.poi_place` to the confirmed centroid, or
+ * `null` when none is within `radiusM`. Returns `category` as stored — it was
+ * already normalized to a `content.business_type.slug` at ingest time
+ * (`services/ingestion/src/transform/poiPlaceRow.ts`'s `mapOvertureCategory`),
+ * so re-mapping it here would be a second, divergent copy of that decision.
+ *
+ * `ST_DWithin` narrows to the handful of candidate rows the GiST index on
+ * `geom` can serve, then `ORDER BY ST_Distance ... LIMIT 1` picks the nearest
+ * of those — the same `geom::geography` metric-radius style
+ * `market-study.repository.ts` uses, deliberately not the `<->` KNN operator
+ * (that index is on `geom`, not `geom::geography`, so KNN would order by
+ * degrees rather than meters).
+ */
+export async function fetchNearestPoi(
+  client: QueryClient,
+  lon: number,
+  lat: number,
+  radiusM: number,
+): Promise<NearestPoiRow | null> {
+  const { rows } = await client.query<{
+    category: string | null;
+    name: string | null;
+    distance_m: number;
+    source_vintage: Date;
+  }>(
+    `SELECT category, name,
+            ST_Distance(geom::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) AS distance_m,
+            source_vintage
+       FROM geo.poi_place
+      WHERE ST_DWithin(geom::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $3)
+      ORDER BY ST_Distance(geom::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) ASC
+      LIMIT 1`,
+    [lon, lat, radiusM],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    category: row.category,
+    name: row.name,
+    distanceM: Number(row.distance_m),
+    sourceVintage: row.source_vintage.toISOString().slice(0, 10),
   };
 }
 

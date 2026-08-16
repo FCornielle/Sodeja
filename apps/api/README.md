@@ -21,7 +21,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | NestJS module | Product module | Notes |
 |---|---|---|
 | `auth` | — | Not built. Supabase JWT verification; RLS is the real enforcement layer. Until it lands, every route below reads `userId` from an `x-user-id` header (`src/common/current-user-id.decorator.ts`) — an explicit placeholder, not an auth boundary |
-| `projects` | — | **Implemented (B-11a + B-7a), minimal.** `POST /projects` (create only — no update/delete/list) + the assumptions sub-resource + `PUT /projects/:id/location` (the area-confirmation gate). See "B-11a contract" and "B-7a contract" below |
+| `projects` | — | **Implemented (B-11a + B-7a + B-8's POI use-label), minimal.** `POST /projects` (create only — no update/delete/list) + the assumptions sub-resource + `PUT /projects/:id/location` (the area-confirmation gate) + `GET /projects/:id/poi-label`. See "B-11a contract", "B-7a contract" and "B-8 contract" below |
 | `geo` | 2, 3 | **Implemented (B-7's slice), minimal.** Read-only footprint lookup + launch-area coverage — just enough to unblock the map UI's Step 1. Full footprint-confirm/polygon-validation is B-8, not built here. See "B-7 contract" below |
 | `market-study` | 1 | **Implemented (B-9).** `POST /projects/:id/market-study`, `PATCH /projects/:id/market-study/manual-competitors` — see "B-9 contract" below |
 | `catalog` | 5 | **Implemented (B-11).** `GET /business-types` — see "B-11 contract" below |
@@ -138,24 +138,71 @@ recomputation itself.
 
 ## B-7a contract — area confirmation gate (`src/projects/`, `src/common/area-gate.ts`)
 
-**`PUT /projects/:id/location`** — body `{ areaSqm, centroidLon, centroidLat }`
+**`PUT /projects/:id/location`** — body
+`{ areaSqm, centroidLon, centroidLat, areaSource? }`
 (`ConfirmProjectLocationRequestSchema`). Idempotent upsert into
-`app.project_location`; always writes `area_source = 'user_entered'` (the
-only source reachable without the map UI — B-7/B-8, not built) and
-`area_confirmed_at = now()`. `404` if the project does not exist or is not
-owned by the caller; `400` on an out-of-range lon/lat. Returns:
+`app.project_location`; writes `area_confirmed_at = now()` and the caller's
+`areaSource`, **defaulting to `'user_entered'` when absent** (B-8 added the
+field; pre-B-8 callers had no map UI, so a typed number is genuinely what
+they sent). The API never *infers* the provenance — whether a confirmed area
+is still the footprint dataset's own figure or something the user changed is
+only knowable by the client that showed them the footprint. `404` if the
+project does not exist or is not owned by the caller; `400` on an
+out-of-range lon/lat or an `areaSource` outside the enum. Returns:
 
 ```ts
 // ProjectLocation (@sodeja/schemas project.ts)
 {
   projectId: string;       // uuid
   areaSqm: number;
-  areaSource: "footprint_dataset" | "user_drawn" | "user_entered"; // always "user_entered" from this endpoint
+  areaSource: "footprint_dataset" | "user_drawn" | "user_entered";
   areaConfirmedAt: string; // ISO datetime
   centroidLon: number; centroidLat: number;
   updatedAt: string;
 }
 ```
+
+## B-8 contract — POI use-label (`src/projects/`)
+
+**`GET /projects/:id/poi-label`** — what `geo.poi_place` records as being at
+the project's confirmed site, so the UI can show "there is currently a
+[category] here" and let the user confirm or correct it. Behind the same
+B-7a area gate (`409` if the area is not confirmed); `404` if the project
+does not exist or is not owned by the caller.
+
+```ts
+// ProjectPoiLabel (@sodeja/schemas project.ts)
+{
+  category: string | null;      // = content.business_type.slug, normalized at ingest (B-5)
+  name: string | null;
+  distanceM: number | null;
+  sourceVintage: string | null; // ISO date
+}
+```
+
+Returns the **single nearest** `geo.poi_place` within **40m** of the
+confirmed centroid. Finding nothing returns all-`null` with a `200` — never
+a `404`. That is a real, common answer, and a client must render it as "no
+record", never as an empty category label: informal DR businesses are
+invisible to every dataset (risk D2), so absence of a record is not absence
+of a business.
+
+The 40m radius absorbs the offset between a footprint centroid and an
+address/entrance-geocoded Overture place without reaching across a DR urban
+block (~80–100m in the launch areas) and mislabelling the business opposite.
+It errs small on purpose — a missed label costs one typed answer, a wrong
+label is a confident claim about the user's site they may not think to
+correct (`POI_LABEL_RADIUS_M`, `src/projects/projects.service.ts`).
+
+`category` is returned exactly as stored — already mapped to a
+`content.business_type.slug` at ingest time by
+`services/ingestion/src/transform/poiPlaceRow.ts`'s `mapOvertureCategory`,
+never re-mapped here. It is nullable **independently of `name`**: rows whose
+raw Overture category maps to no business type this product models are kept
+at ingest, so "a named place is here but we can't classify it" is a real
+state. **No override is persisted** — this endpoint is read-only; a user
+correcting the label is informational to the UI only (see "Related backlog
+items" for what a persisted override would need).
 
 **The gate itself** (`src/common/area-gate.ts`'s `requireConfirmedArea`) is
 called by `capacity`, `fitout`, and `opex` before any computation: `409` if

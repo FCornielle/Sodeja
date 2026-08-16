@@ -9,7 +9,9 @@ import type {
   Project,
   ProjectAssumption,
   ProjectLocation,
+  ProjectPoiLabel,
 } from "@sodeja/schemas";
+import { requireConfirmedArea } from "../common/area-gate.js";
 import { estimatesInvalidatedByDomain } from "./assumption-invalidation.js";
 import {
   fetchAllParameterTables,
@@ -17,7 +19,9 @@ import {
   fetchAssumptionDomain,
   fetchAssumptions,
   fetchBusinessTypeById,
+  fetchConfirmedCentroid,
   fetchJurisdictionSlugById,
+  fetchNearestPoi,
   fetchParameterValueLowHigh,
   fetchProjectCore,
   findPersonalOrgId,
@@ -73,6 +77,25 @@ function toAssumptionDto(row: ProjectAssumptionRow): ProjectAssumption {
   };
 }
 
+/**
+ * B-8 POI use-label search radius, in meters.
+ *
+ * 40m, because the two points being compared are not the same kind of point:
+ * the project centroid is a building footprint's geometric centre, while an
+ * Overture place is geocoded to an address or entrance, which for a mid-block
+ * commercial building sits at the street edge — tens of meters off the
+ * centroid. The radius has to absorb that offset without reaching past it:
+ * a DR urban block in the launch areas (Distrito Nacional / Santo Domingo /
+ * Santiago) runs roughly 80-100m, so 40m stays inside the block and cannot
+ * pick up the business across the street and label it as this site's.
+ *
+ * Erring small is the right direction here: a missed label costs the user one
+ * extra typed answer, while a wrong label is a confident-looking claim about
+ * their site that they may not think to correct — the same "no answer beats a
+ * fabricated one" posture B-9's null demand index takes.
+ */
+const POI_LABEL_RADIUS_M = 40;
+
 function isForeignKeyViolation(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -120,13 +143,15 @@ export class ProjectsService {
   }
 
   /**
-   * B-7a. The narrowest possible slice of the area-confirmation gate:
-   * `PUT /projects/:id/location`, always `area_source = 'user_entered'`
-   * (the only source reachable without the map UI / footprint-confirm flow,
-   * B-7/B-8, not built here). Idempotent — `project_id` is the primary key
-   * on `app.project_location`, so re-calling this re-confirms rather than
-   * erroring. This is what unblocks the 409 gate enforced by
-   * `apps/api/src/common/area-gate.ts` for capacity/fit-out/opex.
+   * B-7a. The area-confirmation gate: `PUT /projects/:id/location`.
+   * Idempotent — `project_id` is the primary key on `app.project_location`,
+   * so re-calling this re-confirms rather than erroring. This is what
+   * unblocks the 409 gate enforced by `apps/api/src/common/area-gate.ts` for
+   * capacity/fit-out/opex.
+   *
+   * B-8 lets the caller declare `areaSource`; absent, it defaults to
+   * `'user_entered'` in `upsertConfirmedLocation` (see its doc comment for
+   * why the API never infers the provenance itself).
    */
   async confirmLocation(
     userId: string,
@@ -141,6 +166,45 @@ export class ProjectsService {
       }
       const row = await upsertConfirmedLocation(client, projectId, input);
       return toLocationDto(row);
+    });
+  }
+
+  /**
+   * B-8. What `geo.poi_place` thinks is currently at the project's confirmed
+   * site, so the UI can show "there is a [category] here" and let the user
+   * confirm or correct it. Finding nothing is a real, common answer — it
+   * returns all-`null`, never a 404 (informal DR businesses are invisible to
+   * every dataset, risk D2: absence of a record is not absence of a
+   * business).
+   */
+  async getPoiLabel(userId: string, projectId: string): Promise<ProjectPoiLabel> {
+    return withUserSession(userId, async (client) => {
+      const core = await fetchProjectCore(client, projectId);
+      if (!core) {
+        // Same RLS-driven "not found" vs "not yours" ambiguity as getAssumptions.
+        throw new NotFoundException(`project ${projectId} not found`);
+      }
+
+      // B-7a's gate (risk T1): asking what is at the site only means anything
+      // once the user has said where the site is.
+      await requireConfirmedArea(client, projectId);
+
+      const centroid = await fetchConfirmedCentroid(client, projectId);
+      if (!centroid) {
+        // requireConfirmedArea already asserted area_confirmed_at IS NOT NULL,
+        // so this would mean the row vanished between the two reads — fail
+        // loudly rather than look up a POI near a null point.
+        throw new Error(`internal: project ${projectId} passed the area gate but has no confirmed centroid`);
+      }
+
+      const poi = await fetchNearestPoi(client, centroid.lon, centroid.lat, POI_LABEL_RADIUS_M);
+      if (!poi) return { category: null, name: null, distanceM: null, sourceVintage: null };
+      return {
+        category: poi.category,
+        name: poi.name,
+        distanceM: poi.distanceM,
+        sourceVintage: poi.sourceVintage,
+      };
     });
   }
 
