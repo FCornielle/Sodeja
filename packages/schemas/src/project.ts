@@ -239,6 +239,66 @@ export const CapacityEstimateSchema = z.object({
 export type CapacityEstimate = z.infer<typeof CapacityEstimateSchema>;
 
 // =========================================================================
+// B-13 — layout zone parameters
+// =========================================================================
+
+/**
+ * `GET /projects/:id/layout-parameters` — everything a client needs to run
+ * `@sodeja/calc`'s `allocateLayoutZones` / `checkLayoutZonePlausibility`
+ * itself, and nothing else. There is no server-side layout result because
+ * there is nothing for the server to decide: the zone split is USER-ENTERED
+ * (packages/calc/src/layout.ts's header explains at length why no zone AREA
+ * SHARE is citable), so the allocation is a pure function of numbers the
+ * client already holds, and `@sodeja/calc` runs identically on every client
+ * (apps/mobile/README.md).
+ *
+ * `densityParameters` is every `domain='layout'` `content.parameter_table`
+ * that resolved for the project's business type, as of today, with no
+ * jurisdiction override — the same resolution B-11's `GET /business-types`
+ * does for `domain='capacity'`. It is legitimately `[]` for a business type
+ * with no covered zone (`salon` has none at all; see the B-13 migration,
+ * packages/db/migrations/1785550000000_seed-layout-parameters.sql). An empty
+ * array means "no citation covers any zone of this business type", so the
+ * client runs the allocation with no plausibility comparison — it never
+ * means an error, and a client must never substitute another business type's
+ * density for a missing one.
+ *
+ * Which zone slug a given `parameterTableSlug` applies to is the client's
+ * mapping to make, exactly as `LayoutZoneDensityCheck.zoneSlug` is: the
+ * client owns the zone vocabulary the user typed shares against, and this
+ * endpoint does not invent zone names the user never saw.
+ */
+export const LayoutParametersSchema = z.object({
+  /** The project's CONFIRMED area (B-7a gate) — the `totalAreaSqm` argument to `allocateLayoutZones`. */
+  areaSqm: z.number().positive(),
+  businessTypeSlug: z.string().min(1),
+  densityParameters: z.array(ResolvedParameterSchema),
+  /**
+   * `staff_base` of the project's latest `app.capacity_estimate` — the
+   * `expectedOccupants` figure for a storage/kitchen zone check. Staff, NOT
+   * seats or daily customers: an IBC stockroom/commercial-kitchen occupant
+   * load counts the people working in that zone, not the customers the sales
+   * floor is sized for (packages/calc/src/layout.ts,
+   * `LayoutZoneDensityCheck`).
+   *
+   * `null` is a normal state, never an error — the client then runs
+   * `allocateLayoutZones` alone and skips `checkLayoutZonePlausibility`
+   * entirely. It must never pass `0` or a guessed figure in its place; the
+   * engine rejects a non-positive `expectedOccupants` for exactly that
+   * reason.
+   */
+  expectedOccupants: z.number().int().positive().nullable(),
+  /**
+   * Why `expectedOccupants` is `null`, or `null` when it is populated. The
+   * two causes need different things from the user (compute a capacity
+   * estimate at all, versus recompute one supplying `staffCount`), so they
+   * are distinguished rather than collapsed into a bare absence.
+   */
+  expectedOccupantsReason: z.string().min(1).nullable(),
+});
+export type LayoutParameters = z.infer<typeof LayoutParametersSchema>;
+
+// =========================================================================
 // B-14 — fit-out cost estimate
 // =========================================================================
 

@@ -87,6 +87,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@sodeja/calc':
+        specifier: workspace:*
+        version: link:../../packages/calc
       '@sodeja/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas

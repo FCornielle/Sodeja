@@ -2,9 +2,9 @@
 
 **Status: `providers` (B-3), `catalog` (B-11), `projects` (B-11a + B-7a's
 area-confirmation slice), `capacity` (B-12), `costs` (B-14 fit-out +
-B-15 opex), `finance` (B-17), `geo` (B-7's read-only slice) and
-`market-study` (B-9) are implemented. Every other module below is
-still a placeholder.**
+B-15 opex), `finance` (B-17), `geo` (B-7's read-only slice),
+`market-study` (B-9) and `layout` (B-13's read-only parameter slice) are
+implemented. Every other module below is still a placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -25,7 +25,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | `geo` | 2, 3 | **Implemented (B-7's slice), minimal.** Read-only footprint lookup + launch-area coverage — just enough to unblock the map UI's Step 1. Full footprint-confirm/polygon-validation is B-8, not built here. See "B-7 contract" below |
 | `market-study` | 1 | **Implemented (B-9).** `POST /projects/:id/market-study`, `PATCH /projects/:id/market-study/manual-competitors` — see "B-9 contract" below |
 | `catalog` | 5 | **Implemented (B-11).** `GET /business-types` — see "B-11 contract" below |
-| `layout` | 4 | Not built. Typology ratio templates |
+| `layout` | 4 | **Implemented (B-13), read-only.** `GET /projects/:id/layout-parameters` — see "B-13 contract" below. No typology ratio templates exist: none are citable |
 | `capacity` | 6 | **Implemented (B-12).** `POST /projects/:id/capacity-estimate` — see "B-12 contract" below |
 | `costs` | 9, 10 | **Implemented (B-14 + B-15).** `POST /projects/:id/fitout-estimate`, `POST /projects/:id/opex-estimate` — see "B-14/B-15 contract" below |
 | `finance` | 7 | **Implemented (B-17).** `POST /projects/:id/financial-projection` — the integration point. See "B-17 contract" below |
@@ -227,6 +227,60 @@ an error). `staff_low/base/high` are populated **only** from the request's
 B-11 migration's comments); omitted, `staff_*` is `null` with a reason.
 `daily_customers_*` is always `null` — no `rotación`/turnover input exists
 yet to derive it from a real basis.
+
+## B-13 contract — `layout` (`src/layout/`)
+
+**`GET /projects/:id/layout-parameters`** — the only `layout` route, and a
+pure read. There is no `POST`, no `app.layout_zone` row, and no
+server-computed zone split: **B-13's zone shares are user-entered**, because
+no standards body publishes zone-to-zone *area proportions* for these
+business types (`packages/db/migrations/1785550000000_seed-layout-parameters.sql`
+seeds zero `content.layout_template` rows and explains why at length). The
+allocation itself is `@sodeja/calc`'s `allocateLayoutZones` /
+`checkLayoutZonePlausibility`, which the client runs — the same TypeScript
+artifact on web and on device (`apps/mobile/README.md`). This endpoint
+supplies only the three things a client cannot derive for itself.
+
+`404` if the project does not exist/is not owned by the caller; `409` if the
+area is not confirmed (B-7a) or the project has no business type.
+
+```ts
+// LayoutParameters (@sodeja/schemas project.ts)
+{
+  areaSqm: number;                        // the CONFIRMED area → allocateLayoutZones' totalAreaSqm
+  businessTypeSlug: string;
+  densityParameters: ResolvedParameter[]; // every domain='layout' parameter_table
+                                          // resolved for this business type, as of
+                                          // today, no jurisdiction override
+  expectedOccupants: number | null;       // latest capacity_estimate.staff_base
+  expectedOccupantsReason: string | null; // why it is null
+}
+```
+
+`densityParameters` is `[]` for a business type with **no cited zone** —
+`salon` has none at all, and the customer-facing zones of every type have
+none either (IBC Table 1004.5 covers storage and commercial kitchens here;
+that is the whole coverage). Empty means "no citation covers any zone of this
+business type", so the client runs the allocation with no plausibility
+comparison. It never means an error, and a client must **never** substitute
+another business type's density for a missing one.
+
+Mapping a `parameterTableSlug` onto a zone slug is the **client's** call, the
+same way `LayoutZoneDensityCheck.zoneSlug` is: the client owns the zone
+vocabulary the user typed shares against, and this endpoint does not invent
+zone names the user never saw.
+
+`expectedOccupants` is the latest `app.capacity_estimate`'s **`staff_base`**
+— not `seats_base`, not `dailyCustomers_base`. An IBC stockroom or
+commercial-kitchen occupant load counts the people *working in that zone*,
+which is not the population the sales floor is sized for
+(`packages/calc/src/layout.ts`, `LayoutZoneDensityCheck`). It is `null` when
+no capacity estimate exists yet, or when the latest one carries no staff
+figure (no staffing-density ratio is seeded — B-12 populates `staff_*` only
+from an explicit `staffCount`, and a stored `0` is reported as absent because
+the engine will not divide against it). `null` is a normal state, not an
+error: the client then runs `allocateLayoutZones` alone. It must never pass
+`0` or a guessed figure in its place.
 
 ## B-14/B-15 contract — `costs` (`src/costs/`)
 
@@ -444,4 +498,4 @@ user sees, it lives in `@sodeja/calc`.
 
 ## Related backlog items
 
-B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, B-14, B-15, B-17, and every other module item B-7 through B-20.
+B-1, B-2, B-3, B-7a, B-11, B-11a, B-12, B-13, B-14, B-15, B-17, and every other module item B-7 through B-20.

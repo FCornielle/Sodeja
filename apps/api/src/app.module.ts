@@ -4,6 +4,7 @@ import { CatalogModule } from "./catalog/catalog.module.js";
 import { CostsModule } from "./costs/costs.module.js";
 import { FinanceModule } from "./finance/finance.module.js";
 import { GeoModule } from "./geo/geo.module.js";
+import { LayoutModule } from "./layout/layout.module.js";
 import { MarketStudyModule } from "./market-study/market-study.module.js";
 import { ProjectsModule } from "./projects/projects.module.js";
 import { ProvidersModule } from "./providers/providers.module.js";
@@ -18,7 +19,9 @@ import { ProvidersModule } from "./providers/providers.module.js";
  * launch-area coverage — just enough to unblock the map UI's Step 1; the
  * full footprint-confirm module is B-8, not built here); B-9 adds
  * `market-study` (Module 1 — population + competition + a demand index,
- * gated behind `geo.data_coverage_cell`'s real coverage-tier signal).
+ * gated behind `geo.data_coverage_cell`'s real coverage-tier signal); B-13
+ * adds `layout` (Module 4 — a read-only parameter endpoint, since the zone
+ * allocation itself runs client-side in `@sodeja/calc`).
  */
 @Module({
   imports: [
@@ -29,6 +32,7 @@ import { ProvidersModule } from "./providers/providers.module.js";
     CostsModule,
     FinanceModule,
     GeoModule,
+    LayoutModule,
     MarketStudyModule,
   ],
 })
