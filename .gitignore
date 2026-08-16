@@ -30,6 +30,11 @@ pnpm-debug.log*
 # Testing
 coverage/
 
+# Local report storage (services/pdf-worker's filesystem driver, B-19) and
+# other local-data directories — never real user output, never committed.
+data/
+apps/api/data/
+
 # OS
 .DS_Store
 Thumbs.db

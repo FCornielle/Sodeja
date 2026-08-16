@@ -5,10 +5,12 @@ import { CostsModule } from "./costs/costs.module.js";
 import { FinanceModule } from "./finance/finance.module.js";
 import { GeoModule } from "./geo/geo.module.js";
 import { LayoutModule } from "./layout/layout.module.js";
+import { LegalModule } from "./legal/legal.module.js";
 import { MarketStudyModule } from "./market-study/market-study.module.js";
 import { PermitsModule } from "./permits/permits.module.js";
 import { ProjectsModule } from "./projects/projects.module.js";
 import { ProvidersModule } from "./providers/providers.module.js";
+import { ReportsModule } from "./reports/reports.module.js";
 
 /**
  * apps/api/README.md documents 13 eventual NestJS modules (auth, geo, ...);
@@ -24,7 +26,11 @@ import { ProvidersModule } from "./providers/providers.module.js";
  * adds `layout` (Module 4 — a read-only parameter endpoint, since the zone
  * allocation itself runs client-side in `@sodeja/calc`); B-18 adds `permits`
  * (Module 12 — a read-only checklist over B-10's rule interpreter; the
- * README's placeholder name for it was `rules`).
+ * README's placeholder name for it was `rules`); B-20 adds `legal` (a
+ * read-only slice: just the current disclaimer document, see the "B-20
+ * contract" README section for what is deliberately not built); B-19 adds
+ * `reports` (Module 13 — the integration point that assembles every
+ * upstream module into a downloadable PDF via `@sodeja/pdf-worker`).
  */
 @Module({
   imports: [
@@ -38,6 +44,8 @@ import { ProvidersModule } from "./providers/providers.module.js";
     LayoutModule,
     MarketStudyModule,
     PermitsModule,
+    LegalModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}
