@@ -7,6 +7,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { CatalogModule } from "./catalog.module.js";
 
 interface CatalogEntryBody {
+  id: number;
   slug: string;
   parameters: Array<{
     parameterTableSlug: string;
@@ -14,6 +15,12 @@ interface CatalogEntryBody {
     provenance: string;
     citation: { sourceDocument: string };
   }>;
+}
+
+interface JurisdictionBody {
+  id: number;
+  slug: string;
+  nameEs: string;
 }
 
 // Integration tests against a real Postgres, same pattern as
@@ -76,5 +83,44 @@ describe.skipIf(!process.env.DATABASE_URL)("GET /business-types (DB-backed)", ()
     const salon = businessTypes.find((bt) => bt.slug === "salon");
     expect(salon).toBeDefined();
     expect(salon?.parameters).toHaveLength(0);
+  });
+
+  it("exposes a numeric id per business type (Step 4: needed for POST /projects)", async () => {
+    const businessTypes = await listBusinessTypes();
+    for (const bt of businessTypes) {
+      expect(Number.isInteger(bt.id)).toBe(true);
+    }
+    expect(new Set(businessTypes.map((bt) => bt.id)).size).toBe(businessTypes.length);
+  });
+});
+
+describe.skipIf(!process.env.DATABASE_URL)("GET /jurisdictions (DB-backed)", () => {
+  let app: INestApplication | undefined;
+
+  afterEach(async () => {
+    await app?.close();
+    app = undefined;
+  });
+
+  afterAll(async () => {
+    await closePool();
+  });
+
+  it("lists exactly the 3 seeded MVP launch metro areas, each with a numeric id", async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [CatalogModule] }).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+    const res = await request(app.getHttpServer()).get("/jurisdictions");
+    expect(res.status).toBe(200);
+    const jurisdictions = res.body as JurisdictionBody[];
+    expect(jurisdictions.map((j) => j.slug).sort()).toEqual([
+      "distrito-nacional",
+      "santiago",
+      "santo-domingo",
+    ]);
+    for (const j of jurisdictions) {
+      expect(Number.isInteger(j.id)).toBe(true);
+      expect(j.nameEs.length).toBeGreaterThan(0);
+    }
   });
 });

@@ -120,12 +120,39 @@ export type Project = z.infer<typeof ProjectSchema>;
  * for what was deliberately left uncited rather than fabricated).
  */
 export const BusinessTypeCatalogEntrySchema = z.object({
+  /**
+   * `content.business_type.id` — added alongside Step 4 (business-type
+   * selection screen) so a client can send it straight into `POST /projects`'
+   * `businessTypeId` without a second lookup. `catalog.service.ts` already
+   * fetched this internally from day one; only the wire contract was missing
+   * it.
+   */
+  id: z.number().int(),
   slug: z.string().min(1),
   nameEs: z.string().min(1),
   descriptionEs: z.string().nullable(),
   parameters: z.array(ResolvedParameterSchema),
 });
 export type BusinessTypeCatalogEntry = z.infer<typeof BusinessTypeCatalogEntrySchema>;
+
+// =========================================================================
+// Jurisdiction catalog — the 3 seeded MVP launch metro areas
+// (packages/db/migrations/1785510924741_seed-rules-content.sql), added
+// alongside Step 4 so a client can resolve a real `jurisdictionId` for
+// `POST /projects` without a raw numeric input. `content.jurisdiction` also
+// has a 'nacional' root row, deliberately excluded here — that row is not a
+// place a project's premises can BE, only a resolution fallback that
+// `@sodeja/rules` reads when no municipal override exists; offering it as a
+// choice on this screen would let a user "select" a metro area that isn't
+// one.
+// =========================================================================
+
+export const JurisdictionSchema = z.object({
+  id: z.number().int(),
+  slug: z.string().min(1),
+  nameEs: z.string().min(1),
+});
+export type Jurisdiction = z.infer<typeof JurisdictionSchema>;
 
 // =========================================================================
 // B-7a — area confirmation gate
