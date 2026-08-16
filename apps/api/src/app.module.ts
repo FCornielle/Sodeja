@@ -4,6 +4,7 @@ import { CatalogModule } from "./catalog/catalog.module.js";
 import { CostsModule } from "./costs/costs.module.js";
 import { FinanceModule } from "./finance/finance.module.js";
 import { GeoModule } from "./geo/geo.module.js";
+import { MarketStudyModule } from "./market-study/market-study.module.js";
 import { ProjectsModule } from "./projects/projects.module.js";
 import { ProvidersModule } from "./providers/providers.module.js";
 
@@ -15,7 +16,9 @@ import { ProvidersModule } from "./providers/providers.module.js";
  * (Module 7 — the integration point that reads capacity/fitout/opex rather
  * than recomputing them); B-7 adds `geo` (read-only footprint lookup +
  * launch-area coverage — just enough to unblock the map UI's Step 1; the
- * full footprint-confirm module is B-8, not built here).
+ * full footprint-confirm module is B-8, not built here); B-9 adds
+ * `market-study` (Module 1 — population + competition + a demand index,
+ * gated behind `geo.data_coverage_cell`'s real coverage-tier signal).
  */
 @Module({
   imports: [
@@ -26,6 +29,7 @@ import { ProvidersModule } from "./providers/providers.module.js";
     CostsModule,
     FinanceModule,
     GeoModule,
+    MarketStudyModule,
   ],
 })
 export class AppModule {}
