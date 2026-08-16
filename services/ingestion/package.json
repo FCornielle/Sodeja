@@ -19,7 +19,9 @@
     "ingest:admin-areas": "node dist/cli.js admin-areas",
     "ingest:footprints": "node dist/cli.js footprints",
     "ingest:census": "node dist/cli.js census",
-    "ingest:poi": "node dist/cli.js poi"
+    "ingest:poi": "node dist/cli.js poi",
+    "ingest:data-coverage": "node dist/cli.js data-coverage",
+    "ingest:population-grid": "node dist/cli.js population-grid"
   },
   "dependencies": {
     "@sodeja/db": "workspace:*",

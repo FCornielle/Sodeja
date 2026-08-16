@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { createLogger } from "@sodeja/observability";
 import { closePool } from "@sodeja/db";
+import { runComputeDataCoverageJob } from "./jobs/computeDataCoverage.js";
+import { runComputePopulationGridJob } from "./jobs/computePopulationGrid.js";
 import { runIngestAdminAreasJob } from "./jobs/ingestAdminAreas.js";
 import { runIngestBuildingFootprintsJob } from "./jobs/ingestBuildingFootprints.js";
 import { runIngestCensusPopulationJob } from "./jobs/ingestCensusPopulation.js";
@@ -11,6 +13,8 @@ const JOBS: Record<string, (logger: ReturnType<typeof createLogger>) => Promise<
   footprints: runIngestBuildingFootprintsJob,
   census: runIngestCensusPopulationJob,
   poi: runIngestPoiPlacesJob,
+  "data-coverage": runComputeDataCoverageJob,
+  "population-grid": runComputePopulationGridJob,
 };
 
 async function main(): Promise<void> {
