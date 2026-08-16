@@ -1,35 +1,66 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import type { ProjectLocation } from "@sodeja/schemas";
 import type { LocationDraft } from "../lib/types";
 import { ConfirmAreaStep } from "./confirm/ConfirmAreaStep";
 import { PoiLabelStep } from "./confirm/PoiLabelStep";
+import { FitoutEstimateStep } from "./costs/FitoutEstimateStep";
+import { OpexEstimateStep } from "./costs/OpexEstimateStep";
 import { LayoutZonesStep } from "./layout/LayoutZonesStep";
 import { LocationStep } from "./location/LocationStep";
+import { MarketStudyStep } from "./market/MarketStudyStep";
+import { ProjectionStep } from "./projection/ProjectionStep";
+import { SummaryExportStep } from "./summary/SummaryExportStep";
 
-type FlowStep = "location" | "confirm" | "poi-label" | "layout" | "done";
+type FlowStep =
+  | "location"
+  | "confirm"
+  | "poi-label"
+  | "layout"
+  | "market-study"
+  | "fitout"
+  | "opex"
+  | "projection"
+  | "summary";
 
 /**
- * Steps 1-2 + Secondary Flow A (specs/ux/flows.md, B-7), plus B-8's POI
- * use-label and B-13's zone allocation, both immediately after the area gate
- * passes — `GET /projects/:id/poi-label` and `GET /projects/:id/
- * layout-parameters` are gated behind that confirmation, so neither can be
- * asked earlier. The remaining steps (market study, business type,
- * capacity/cost, projection, export) are separate, unbuilt backlog items —
- * reaching "done" here shows a plain placeholder rather than pretending to
- * continue the real 9-step flow.
+ * The primary flow (specs/ux/flows.md), Steps 1-3 and 6-9, in this app's
+ * ACTUAL order: location → confirm → poi-label → layout → market-study →
+ * fitout → opex → projection → summary. Two deliberate deviations from the
+ * spec's numbered order, both already forced by decisions made outside this
+ * file:
  *
- * B-18's permits checklist is built and reachable, but it is linked out of
- * that placeholder instead of appended as a step: its own preconditions are
- * already met here, yet placing Module 12 immediately after Module 4 would
- * imply the seven modules in between had been completed.
+ * 1. Step 4 (business type) and the jurisdiction it implies do NOT appear
+ *    here at all — they are answered BEFORE this component ever mounts, on
+ *    `app/page.tsx`'s `BusinessTypeStep`, because `POST /projects` (B-11a)
+ *    requires both at project-creation time. See that file's doc comment for
+ *    the full reasoning. By the time `ProjectFlow` runs, business type and
+ *    jurisdiction are already fixed.
+ * 2. Step 3 (market study) is sequenced AFTER Step 4's zone allocation
+ *    (`layout`) rather than immediately after Step 2, because this is where
+ *    B-7 through B-13 already left the flow (`poi-label` and `layout` are
+ *    gated behind the same B-7a area-confirmation this step also needs, and
+ *    reordering those already-shipped, already-tested steps was out of scope
+ *    for this change). Market study's own real prerequisite — a confirmed
+ *    area — is satisfied regardless of exactly where in this sequence it
+ *    runs.
+ *
+ * Step 5's capacity half (Module 6) has no screen in this app — see
+ * `ProjectionStep.tsx`'s doc comment for the one place that gap is worked
+ * around (a minimal inline "unblock" action, not a full capacity screen).
+ *
+ * B-18's permits checklist is built and reachable, but stays a link out of
+ * `SummaryExportStep` rather than an appended step — same reasoning this
+ * file's previous version already gave: its own preconditions (area,
+ * jurisdiction, business type) are met well before the summary step, so
+ * placing Module 12 as the tenth step in this sequence would misstate how
+ * much of the flow precedes it.
  */
 export function ProjectFlow({ projectId }: { projectId: string }) {
   const [step, setStep] = useState<FlowStep>("location");
   const [draft, setDraft] = useState<LocationDraft | null>(null);
-  const [confirmedLocation, setConfirmedLocation] = useState<ProjectLocation | null>(null);
+  const [, setConfirmedLocation] = useState<ProjectLocation | null>(null);
 
   if (step === "confirm" && draft) {
     return (
@@ -59,46 +90,56 @@ export function ProjectFlow({ projectId }: { projectId: string }) {
     return (
       <LayoutZonesStep
         projectId={projectId}
-        onContinue={() => setStep("done")}
+        onContinue={() => setStep("market-study")}
         onBackToConfirm={() => setStep("confirm")}
       />
     );
   }
 
-  if (step === "done" && confirmedLocation) {
+  if (step === "market-study") {
     return (
-      <div className="mx-auto flex h-full max-w-lg flex-col items-center justify-center gap-3 p-6 text-center">
-        <h1 className="text-xl font-semibold text-neutral-900">Área confirmada</h1>
-        <p className="text-sm text-neutral-600">
-          {confirmedLocation.areaSqm.toFixed(0)} m² · fuente: {confirmedLocation.areaSource}
-        </p>
-        <p className="text-xs text-neutral-500">
-          Los pasos siguientes (mercado, tipo de negocio, capacidad, costos, proyección) no forman
-          parte de este cambio (B-7).
-        </p>
-        <Link
-          href={`/project/${projectId}/permits`}
-          className="mt-2 rounded border border-blue-600 px-4 py-2 text-sm font-medium text-blue-600"
-        >
-          Ver permisos y trámites
-        </Link>
-        <p className="text-xs text-neutral-500">
-          Disponible por separado: no es el paso siguiente del flujo, sino una lista que ya se puede
-          consultar con los datos de este proyecto.
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setDraft(null);
-            setConfirmedLocation(null);
-            setStep("location");
-          }}
-          className="mt-2 rounded border border-neutral-300 px-4 py-2 text-sm"
-        >
-          Confirmar otra ubicación
-        </button>
-      </div>
+      <MarketStudyStep
+        projectId={projectId}
+        onContinue={() => setStep("fitout")}
+        onBackToConfirm={() => setStep("confirm")}
+      />
     );
+  }
+
+  if (step === "fitout") {
+    return (
+      <FitoutEstimateStep
+        projectId={projectId}
+        onContinue={() => setStep("opex")}
+        onBackToConfirm={() => setStep("confirm")}
+      />
+    );
+  }
+
+  if (step === "opex") {
+    return (
+      <OpexEstimateStep
+        projectId={projectId}
+        onContinue={() => setStep("projection")}
+        onBackToConfirm={() => setStep("confirm")}
+      />
+    );
+  }
+
+  if (step === "projection") {
+    return (
+      <ProjectionStep
+        projectId={projectId}
+        onContinue={() => setStep("summary")}
+        onNavigateToConfirm={() => setStep("confirm")}
+        onNavigateToFitout={() => setStep("fitout")}
+        onNavigateToOpex={() => setStep("opex")}
+      />
+    );
+  }
+
+  if (step === "summary") {
+    return <SummaryExportStep projectId={projectId} />;
   }
 
   return (
