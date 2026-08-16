@@ -1,6 +1,7 @@
 # `@sodeja/calc` — Capacity & Financial Engine
 
-**Status: B-16 implemented (primitives only).** This package currently
+**Status: B-16 implemented (primitives), plus B-13's layout allocation
+(`layout.ts`).** This package currently
 implements the *engine substrate* — Money/MoneyRange arithmetic, the Range
 combinator layer, and the engine versioning/snapshot mechanism. It
 deliberately does **not** yet implement capacity ratios, fit-out cost
@@ -41,7 +42,8 @@ this engine's own `Range<Money>` / `Range<number>` shape by
 quoted in USD while revenue and payroll are DOP. There is no implicit or
 fetched rate anywhere in this package.
 
-**Range-valued.** Outputs are `{pessimistic, base, optimistic}`
+**Range-valued — where a range is what the quantity actually is.** Outputs are
+`{pessimistic, base, optimistic}`
 (`range.ts`'s `Range<T>`), never point estimates. A single confident-looking
 number is the mechanism by which risk D1 does its damage. `mapRange` and
 `combineRange` verify — not just assume — that the invariant
@@ -51,7 +53,11 @@ corrupted range if the caller's function was not monotonic non-decreasing
 (see the doc comments in `range.ts` for what that means for something like
 subtracting a cost range from a revenue range — that inversion is
 domain-specific and is left to the modules that actually implement financial
-logic).
+logic). The one deliberate exception is `layout.ts`'s zone allocation: a share
+the user typed in is one number they chose, not a three-point estimate, and
+wrapping it in a `Range` would manufacture a spread the user never expressed.
+The *cited* density it is compared against is three-point and stays a
+`Range<number>` end to end.
 
 ## The B-10 coupling
 
