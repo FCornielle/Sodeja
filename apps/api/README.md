@@ -3,8 +3,9 @@
 **Status: `providers` (B-3), `catalog` (B-11), `projects` (B-11a + B-7a's
 area-confirmation slice), `capacity` (B-12), `costs` (B-14 fit-out +
 B-15 opex), `finance` (B-17), `geo` (B-7's read-only slice),
-`market-study` (B-9) and `layout` (B-13's read-only parameter slice) are
-implemented. Every other module below is still a placeholder.**
+`market-study` (B-9), `layout` (B-13's read-only parameter slice), `permits`
+(B-18) and `legal` (B-20's minimal slice) are implemented. Every other
+module below is still a placeholder.**
 
 One deployable containing every product module except the three day-one
 carve-outs (`services/pdf-worker`, `services/ingestion`, `services/geo-ml`).
@@ -31,7 +32,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | `finance` | 7 | **Implemented (B-17).** `POST /projects/:id/financial-projection` — the integration point. See "B-17 contract" below |
 | `permits` | 12 | **Implemented (B-18), read-only.** `GET /projects/:id/permits-checklist` — see "B-18 contract" below. Named `rules` in earlier drafts of this table; the NestJS module is `permits`, since `@sodeja/rules` is the package it calls into |
 | `reports` | 13 | Not built. Enqueues work; does not render |
-| `legal` | — | Not built. ToS acceptance, Ley 172-13 consent, export/delete |
+| `legal` | — | **Implemented (B-20's minimal slice), read-only.** `GET /legal/documents/:kind/current` — see "B-20 contract" below. ToS acceptance tracking, Ley 172-13 consent, and export/delete are deliberately NOT built (need the login flow, UX spec Step 0, which does not exist yet) |
 | `providers` | — | **Implemented (B-3).** Server-side proxy for all external map/POI providers |
 
 ## B-11 contract — `catalog` (`src/catalog/`)
@@ -517,6 +518,37 @@ OpenAPI spec has a matching `PATCH`; both are deferred because they need a
 product decision B-18 does not contain — when the checklist freezes, and what
 happens to a user's ticked boxes once the underlying rule pack is superseded.
 This endpoint recomputes on every call.
+
+## B-20 contract — `legal` (`src/legal/`)
+
+**`GET /legal/documents/:kind/current?locale=`** (locale defaults `es-DO`) —
+`app.legal_document` reference content, no auth (same posture as `GET
+/business-types`; see legal.repository.ts's doc comment for why RLS does
+not apply here). `400` for an invalid `:kind`; `404` when no document of
+that `kind`/`locale` has been seeded.
+
+**This is a deliberately minimal slice**, not the full B-20 backlog item.
+The following are NOT built here, and the reason is the same for all of
+them: they need a real login step (UX spec Step 0 — email/Google sign-in),
+which does not exist anywhere in this codebase yet (every route still reads
+`userId` from the `x-user-id` header placeholder). Building any of them now
+would mean half-implementing an acceptance/consent-tracking flow with
+nothing real to attach it to:
+
+- `app.legal_acceptance` — versioned ToS/privacy acceptance tracking.
+- Ley 172-13 granular consent (`app.consent`: precise location, analytics,
+  marketing, cross-border transfer).
+- Export/delete-my-data endpoints (Ley 172-13 data-subject rights).
+
+Only ONE `app.legal_document` row is seeded
+(packages/db/migrations/1785570000000_seed-disclaimer-legal-document.sql):
+`kind='disclaimer', version='1', locale='es-DO'`. Its `body_md` is a
+GENERIC, CONSERVATIVE placeholder — informational/estimative output, not
+audited, not professional advice, no warranty, provisional — written
+WITHOUT citing any DR law and WITHOUT claiming legal review took place
+(P0-4, "Engage DR contador + lawyer," is still open — see the migration's
+own header for the full reasoning). It exists to satisfy B-19's schema
+constraint honestly, not to substitute for real legal review.
 
 ## Architectural rules
 
