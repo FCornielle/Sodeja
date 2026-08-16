@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { ProjectLocation } from "@sodeja/schemas";
 import type { LocationDraft } from "../lib/types";
 import { ConfirmAreaStep } from "./confirm/ConfirmAreaStep";
@@ -16,9 +17,14 @@ type FlowStep = "location" | "confirm" | "poi-label" | "layout" | "done";
  * passes — `GET /projects/:id/poi-label` and `GET /projects/:id/
  * layout-parameters` are gated behind that confirmation, so neither can be
  * asked earlier. The remaining steps (market study, business type,
- * capacity/cost, projection, permits, export) are separate, unbuilt backlog
- * items — reaching "done" here shows a plain placeholder rather than
- * pretending to continue the real 9-step flow.
+ * capacity/cost, projection, export) are separate, unbuilt backlog items —
+ * reaching "done" here shows a plain placeholder rather than pretending to
+ * continue the real 9-step flow.
+ *
+ * B-18's permits checklist is built and reachable, but it is linked out of
+ * that placeholder instead of appended as a step: its own preconditions are
+ * already met here, yet placing Module 12 immediately after Module 4 would
+ * imply the seven modules in between had been completed.
  */
 export function ProjectFlow({ projectId }: { projectId: string }) {
   const [step, setStep] = useState<FlowStep>("location");
@@ -67,8 +73,18 @@ export function ProjectFlow({ projectId }: { projectId: string }) {
           {confirmedLocation.areaSqm.toFixed(0)} m² · fuente: {confirmedLocation.areaSource}
         </p>
         <p className="text-xs text-neutral-500">
-          Los pasos siguientes (mercado, tipo de negocio, capacidad, costos, proyección, permisos)
-          no forman parte de este cambio (B-7).
+          Los pasos siguientes (mercado, tipo de negocio, capacidad, costos, proyección) no forman
+          parte de este cambio (B-7).
+        </p>
+        <Link
+          href={`/project/${projectId}/permits`}
+          className="mt-2 rounded border border-blue-600 px-4 py-2 text-sm font-medium text-blue-600"
+        >
+          Ver permisos y trámites
+        </Link>
+        <p className="text-xs text-neutral-500">
+          Disponible por separado: no es el paso siguiente del flujo, sino una lista que ya se puede
+          consultar con los datos de este proyecto.
         </p>
         <button
           type="button"

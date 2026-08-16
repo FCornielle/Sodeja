@@ -1,4 +1,4 @@
-# Ruflo — Claude Code Configuration
+# SODEJA — Claude Code Configuration
 
 ## Rules
 
@@ -12,169 +12,60 @@
 - Keep files under 500 lines
 - Validate input at system boundaries
 
-## Agent Comms (SendMessage-First Coordination)
+## Agents — one specialist per feature
 
-Named agents coordinate via `SendMessage`, not polling or shared state.
+Every backlog item gets implemented by spawning exactly **one** subagent —
+never a multi-role team (`architect`+`coder`+`tester`+`reviewer` in parallel).
+That pattern was in this file's boilerplate from `ruflo init` but was never
+actually used across B-1 through B-17+, which were all implemented, tested,
+and validated end-to-end by a single agent per item. One specialist per
+feature keeps that discipline while still getting a prompt tailored to the
+part of the codebase the feature actually touches.
 
-```
-Lead (you) ←→ architect ←→ developer ←→ tester ←→ reviewer
-              (named agents message each other directly)
-```
+Pick the specialist by which package/app owns the feature's primary scope:
 
-### Spawning a Coordinated Team
+| Domain | Agent | Owns |
+|---|---|---|
+| API / provider adapters / resilience | `sodeja-backend` | `apps/api`, `packages/providers`, `packages/observability` |
+| Database / RLS / ingestion | `sodeja-data` | `packages/db`, `services/ingestion` |
+| Financial calculations / business rules | `sodeja-calc` | `packages/calc`, `packages/rules` |
+| Frontend / map UI | `sodeja-web` | `apps/web` |
 
-```javascript
-// ALL agents in ONE message, each knows WHO to message next
-Agent({ prompt: "Research the codebase. SendMessage findings to 'architect'.",
-  subagent_type: "researcher", name: "researcher", run_in_background: true })
-Agent({ prompt: "Wait for 'researcher'. Design solution. SendMessage to 'coder'.",
-  subagent_type: "system-architect", name: "architect", run_in_background: true })
-Agent({ prompt: "Wait for 'architect'. Implement it. SendMessage to 'tester'.",
-  subagent_type: "coder", name: "coder", run_in_background: true })
-Agent({ prompt: "Wait for 'coder'. Write tests. SendMessage results to 'reviewer'.",
-  subagent_type: "tester", name: "tester", run_in_background: true })
-Agent({ prompt: "Wait for 'tester'. Review code quality and security.",
-  subagent_type: "reviewer", name: "reviewer", run_in_background: true })
+Definitions live in `.claude/agents/sodeja/*.md`. Each one already encodes
+this project's established conventions (DI-token adapters, `withTimeout`'s
+`Promise.race` fix, RLS session helpers, Money currency guards, the
+server-side-proxy posture, etc.) so it doesn't need to be re-derived from
+scratch on every spawn.
 
-// Kick off the pipeline
-SendMessage({ to: "researcher", summary: "Start", message: "[task context]" })
-```
+Rules:
 
-### Patterns
+- Read the backlog item's scope/dependencies/acceptance criteria from
+  `docs/SODEJA_MVP_BACKLOG.md` yourself first, then spawn the one matching
+  specialist with that context — don't make the specialist re-discover the
+  backlog on its own.
+- If a feature genuinely spans two domains (rare — B-7a's gate touched
+  several controllers), dispatch to specialists sequentially, one at a time,
+  not in parallel — each waits for the prior one's result before starting.
+- Reserve `fork`/`general-purpose` for things that aren't a backlog feature at
+  all — an open-ended audit, a parallel research question — per this file's
+  own earlier convention; those aren't "features" and don't need a SODEJA
+  specialist.
+- The old generic agent roster this repo shipped with (`byzantine-coordinator`,
+  `raft-manager`, `gossip-coordinator`, SPARC phase agents, etc.) has been
+  removed — none of it matched this project's actual stack, and several of
+  those names were referenced in this file's old text without ever having a
+  real definition backing them.
 
-| Pattern | Flow | Use When |
-|---------|------|----------|
-| **Pipeline** | A → B → C → D | Sequential dependencies (feature dev) |
-| **Fan-out** | Lead → A, B, C → Lead | Independent parallel work (research) |
-| **Supervisor** | Lead ↔ workers | Ongoing coordination (complex refactor) |
+## Ruflo MCP (optional, currently unreliable)
 
-### Rules
-
-- ALWAYS name agents — `name: "role"` makes them addressable
-- ALWAYS include comms instructions in prompts — who to message, what to send
-- Spawn ALL agents in ONE message with `run_in_background: true`
-- After spawning: STOP, tell user what's running, wait for results
-- NEVER poll status — agents message back or complete automatically
-
-## Swarm & Routing
-
-### Config
-- **Topology**: hierarchical-mesh (anti-drift)
-- **Max Agents**: 5
-- **Memory**: hybrid
-- **HNSW**: Enabled
-- **Neural**: Enabled
-
-```bash
-npx @claude-flow/cli@latest swarm init --topology hierarchical --max-agents 8 --strategy specialized
-```
-
-### Agent Routing
-
-| Task | Agents | Topology |
-|------|--------|----------|
-| Bug Fix | researcher, coder, tester | hierarchical |
-| Feature | architect, coder, tester, reviewer | hierarchical |
-| Refactor | architect, coder, reviewer | hierarchical |
-| Performance | perf-engineer, coder | hierarchical |
-| Security | security-architect, auditor | hierarchical |
-
-### When to Swarm
-- **YES**: 3+ files, new features, cross-module refactoring, API changes, security, performance
-- **NO**: single file edits, 1-2 line fixes, docs updates, config changes, questions
-
-### 3-Tier Model Routing
-
-| Tier | Handler | Use Cases |
-|------|---------|-----------|
-| 1 | Agent Booster (WASM) | Simple transforms — skip LLM, use Edit directly |
-| 2 | Haiku | Simple tasks, low complexity |
-| 3 | Sonnet/Opus | Architecture, security, complex reasoning |
-
-## Memory & Learning
-
-### Before Any Task
-```bash
-npx @claude-flow/cli@latest memory search --query "[task keywords]" --namespace patterns
-npx @claude-flow/cli@latest hooks route --task "[task description]"
-```
-
-### After Success
-```bash
-npx @claude-flow/cli@latest memory store --namespace patterns --key "[name]" --value "[what worked]"
-npx @claude-flow/cli@latest hooks post-task --task-id "[id]" --success true --store-results true
-```
-
-### MCP Tools (use `ToolSearch("keyword")` to discover)
-
-| Category | Key Tools |
-|----------|-----------|
-| **Memory** | `memory_store`, `memory_search`, `memory_search_unified` |
-| **Bridge** | `memory_import_claude`, `memory_bridge_status` |
-| **Swarm** | `swarm_init`, `swarm_status`, `swarm_health` |
-| **Agents** | `agent_spawn`, `agent_list`, `agent_status` |
-| **Hooks** | `hooks_route`, `hooks_post-task`, `hooks_worker-dispatch` |
-| **Security** | `aidefence_scan`, `aidefence_is_safe`, `aidefence_has_pii` |
-| **Hive-Mind** | `hive-mind_init`, `hive-mind_consensus`, `hive-mind_spawn` |
-
-### Background Workers
-
-| Worker | When |
-|--------|------|
-| `audit` | After security changes |
-| `optimize` | After performance work |
-| `testgaps` | After adding features |
-| `map` | Every 5+ file changes |
-| `document` | After API changes |
-
-```bash
-npx @claude-flow/cli@latest hooks worker dispatch --trigger audit
-```
-
-## Agents
-
-**Core**: `coder`, `reviewer`, `tester`, `planner`, `researcher`
-**Architecture**: `system-architect`, `backend-dev`, `mobile-dev`
-**Security**: `security-architect`, `security-auditor`
-**Performance**: `performance-engineer`, `perf-analyzer`
-**Coordination**: `hierarchical-coordinator`, `mesh-coordinator`, `adaptive-coordinator`
-**GitHub**: `pr-manager`, `code-review-swarm`, `issue-tracker`, `release-manager`
-
-Any string works as a custom agent type.
+The `ruflo` MCP server (`memory_store`, `swarm_init`, `hooks_route`, etc.) is
+registered globally but frequently fails to connect. Don't rely on it or
+route work through it by default. If it happens to be connected and a task
+would genuinely benefit from its memory/swarm tools, discover them via
+`ToolSearch` first — never assume they're loaded.
 
 ## Build & Test
 
-- ALWAYS run tests after code changes
+- ALWAYS run the full validation suite after code changes:
+  `pnpm turbo run lint typecheck test build`
 - ALWAYS verify build succeeds before committing
-
-```bash
-npm run build && npm test
-```
-
-## CLI Quick Reference
-
-```bash
-npx @claude-flow/cli@latest init --wizard           # Setup
-npx @claude-flow/cli@latest swarm init --v3-mode     # Start swarm
-npx @claude-flow/cli@latest memory search --query "" # Vector search
-npx @claude-flow/cli@latest hooks route --task ""    # Route to agent
-npx @claude-flow/cli@latest doctor --fix             # Diagnostics
-npx @claude-flow/cli@latest security scan            # Security scan
-npx @claude-flow/cli@latest performance benchmark    # Benchmarks
-```
-
-26 commands, 140+ subcommands. Use `--help` on any command for details.
-
-## Setup
-
-```bash
-claude mcp add claude-flow -- npx -y ruflo@latest mcp start
-npx ruflo@latest doctor --fix
-```
-
-> The background `daemon` is optional. It runs interval workers that each spawn
-> a headless `claude` session, so it consumes tokens continuously. Start it only
-> if you want those sweeps: `npx ruflo@latest daemon start` (self-stops after 12h
-> by default; `--ttl 0` to disable, `daemon status --all` to audit running daemons).
-
-**Agent tool** handles execution (agents, files, code, git). **MCP tools** handle coordination (swarm, memory, hooks). **CLI** is the same via Bash.
