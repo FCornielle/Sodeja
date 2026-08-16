@@ -5,9 +5,13 @@ in `rule_pack` / `rule` / `parameter_value` (see
 [`specs/db/schema.sql`](../../specs/db/schema.sql)). Modules 12 (permits) and,
 in Phase 2, 11 (tax directory) are driven entirely by this interpreter reading
 content — never by branching code. This package does **not** seed any permit
-(`rule_pack`/`rule`) content itself — MOPC's R-007 scope of application is
-still unread/unconfirmed (SODEJA_RISKS.md addendum), so that content is
-explicitly B-18's job, not B-10's. What this package seeds is a narrow set of
+(`rule_pack`/`rule`) content itself. That content is B-18's, and it now exists:
+`packages/db/migrations/1785560000000_seed-permits-content.sql` seeds the
+Module 12 checklist for the national jurisdiction plus Distrito Nacional and
+Santiago. Read that migration's header before changing it — it records which
+requirements were verified against primary legal texts and which were
+deliberately left uncovered (MOPC's R-032 among them: its current text was not
+retrievable from any official source). What this package seeds is a narrow set of
 `parameter_value` figures the Data Sources doc marks "VERIFIED exactly" (see
 the migration for the full list and what was deliberately left out).
 
