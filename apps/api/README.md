@@ -2,7 +2,8 @@
 
 **Status: `providers` (B-3), `catalog` (B-11), `projects` (B-11a + B-7a's
 area-confirmation slice), `capacity` (B-12), `costs` (B-14 fit-out +
-B-15 opex) and `finance` (B-17) are implemented. Every other module below is
+B-15 opex), `finance` (B-17), `geo` (B-7's read-only slice) and
+`market-study` (B-9) are implemented. Every other module below is
 still a placeholder.**
 
 One deployable containing every product module except the three day-one
@@ -21,8 +22,8 @@ product modules and gives real boundaries at no runtime cost. Validation via
 |---|---|---|
 | `auth` | — | Not built. Supabase JWT verification; RLS is the real enforcement layer. Until it lands, every route below reads `userId` from an `x-user-id` header (`src/common/current-user-id.decorator.ts`) — an explicit placeholder, not an auth boundary |
 | `projects` | — | **Implemented (B-11a + B-7a), minimal.** `POST /projects` (create only — no update/delete/list) + the assumptions sub-resource + `PUT /projects/:id/location` (the area-confirmation gate). See "B-11a contract" and "B-7a contract" below |
-| `geo` | 2, 3 | Not built. Footprint lookup, polygon validation, coverage scoring |
-| `market-study` | 1 | Not built. Population + competition counts + confidence score |
+| `geo` | 2, 3 | **Implemented (B-7's slice), minimal.** Read-only footprint lookup + launch-area coverage — just enough to unblock the map UI's Step 1. Full footprint-confirm/polygon-validation is B-8, not built here. See "B-7 contract" below |
+| `market-study` | 1 | **Implemented (B-9).** `POST /projects/:id/market-study`, `PATCH /projects/:id/market-study/manual-competitors` — see "B-9 contract" below |
 | `catalog` | 5 | **Implemented (B-11).** `GET /business-types` — see "B-11 contract" below |
 | `layout` | 4 | Not built. Typology ratio templates |
 | `capacity` | 6 | **Implemented (B-12).** `POST /projects/:id/capacity-estimate` — see "B-12 contract" below |
@@ -289,6 +290,75 @@ unit) when any line never reaches break-even in one of its variants —
 projection, not audited, not financial advice" caveat (risk L1).
 `rule_pack_ids` is always `'{}'` — no permit/tax `content.rule_pack` rows
 exist yet (B-18/B-11 seeded only parameter values).
+
+## B-7 contract — `geo` (`src/geo/`)
+
+Read-only, no auth/RLS (same posture as `catalog`'s `GET /business-types` —
+`geo.*` is reference/ingested data, not user-owned).
+
+- **`GET /geo/footprints/at?lon=&lat=`** — every `geo.building_footprint`
+  containing the point (`ST_Contains`), zero/one/many. Zero means "no
+  candidate" (the map UI falls through to a manual polygon draw); many means
+  overlapping datasets, a real UX state, never collapsed to one.
+- **`GET /geo/footprints?bbox=minLon,minLat,maxLon,maxLat`** — footprints
+  intersecting a viewport bbox, capped at a 0.5° span and 2000 rows (generous
+  sanity ceilings against an unbounded query, not a tuned viewport size).
+- **`GET /geo/coverage?lon=&lat=`** — `{covered, adminAreaId, adminAreaName}`,
+  checking `geo.admin_area` (`level='provincia'`) against the exact three
+  launch-area province names (`LAUNCH_AREA_PROVINCES`,
+  `src/geo/geo.repository.ts`) — the same three `content.jurisdiction` and
+  `services/ingestion`'s B-9 grid job use, never a fourth hardcoded
+  definition of "the launch area".
+
+## B-9 contract — `market-study` (`src/market-study/`)
+
+Module 1: population, competition, and a demand index within a radius of the
+project's confirmed site — gated behind `geo.data_coverage_cell`'s real
+coverage-tier signal (risk D3), which `services/ingestion`'s
+`computeDataCoverage`/`computePopulationGrid` jobs populate.
+
+**`POST /projects/:id/market-study?radiusM=`** (default `500`, per the UX
+spec's Step 3 default; capped at `5000`). `409`s if the project's area is not
+confirmed (B-7a gate) or has no business type set. Computes and **upserts**
+`app.market_study` (one row per project — `project_id` is its primary key,
+unlike `capacity_estimate`/`fitout_estimate`/`opex_estimate`'s append-only
+history):
+
+- `populationEst` — sum of `geo.population_grid.population_est` for every
+  cell within `radiusM` meters of the confirmed centroid (`ST_DWithin`,
+  whole cells counted, not clipped to the circle — same simplification
+  `lib/grid.ts` documents for grid generation itself).
+- `competitorCount` — count of `geo.poi_place` within the radius whose
+  `category` (normalized at ingest time, B-5) matches the project's business
+  type.
+- `confidence` — the **worst** (lowest-ranked) `geo.data_coverage_cell.tier`
+  among cells intersecting the radius; `'insuficiente'` if zero coverage
+  cells exist there at all (a real, common outcome in a database where the
+  B-9 ingestion jobs haven't been run yet for that area — not an error).
+- `demandIndexLow/Base/High` — population per (dataset + manually-added)
+  competitor, as a `Range<number>` (`@sodeja/calc`) banded by confidence
+  (±10% `alta`, ±25% `media`, ±50% `baja`). **`null`** when `confidence ===
+  'insuficiente'` or total competitors is zero — never a fabricated figure
+  standing in for a number the system doesn't actually have grounds for.
+- `censusYear` — from the most specific `geo.admin_area` intersecting the
+  point that has a `geo.census_population` row (same resolution rule
+  `computePopulationGrid.ts` uses, so the year always matches the census
+  figure that actually produced `populationEst`).
+
+**`populationEst`/`competitorCount` are ALWAYS real computed numbers** — the
+`app.market_study` columns are `NOT NULL`. Suppressing the figure when
+`confidence === 'insuficiente'` (UX spec Step 3: "Numbers suppressed, not
+shown greyed") is a **presentation-layer** decision for whichever UI reads
+this response — this endpoint does not null anything out itself. A future
+frontend must apply that rule; it is not enforced here.
+
+**`PATCH /projects/:id/market-study/manual-competitors`** — body `{ delta }`
+(signed integer). Per the UX spec, manually-observed competitors are a
+first-class, ongoing input (informal businesses are invisible to every
+dataset — risk D2), not a fallback: `competitorsUserAdded` is preserved
+across a recomputation (a `POST` never resets it), and factors into
+`demandIndex`'s total-competitor denominator. `404`s if no market study has
+been computed for the project yet.
 
 ## Architectural rules
 

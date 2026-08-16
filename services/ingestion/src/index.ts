@@ -1,12 +1,18 @@
 export * from "./transform/adminAreaRow.js";
 export * from "./transform/censusRow.js";
+export * from "./transform/coverageTier.js";
 export * from "./transform/footprintRow.js";
 export * from "./transform/poiPlaceRow.js";
+export * from "./transform/populationApportionment.js";
 
+export * from "./jobs/computeDataCoverage.js";
+export * from "./jobs/computePopulationGrid.js";
 export * from "./jobs/ingestAdminAreas.js";
 export * from "./jobs/ingestBuildingFootprints.js";
 export * from "./jobs/ingestCensusPopulation.js";
 export * from "./jobs/ingestPoiPlaces.js";
+
+export * from "./lib/grid.js";
 
 export * from "./sources/ochaAdminAreas.js";
 export * from "./sources/msGlobalMl.js";
