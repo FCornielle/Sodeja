@@ -6,6 +6,7 @@ import { FinanceModule } from "./finance/finance.module.js";
 import { GeoModule } from "./geo/geo.module.js";
 import { LayoutModule } from "./layout/layout.module.js";
 import { MarketStudyModule } from "./market-study/market-study.module.js";
+import { PermitsModule } from "./permits/permits.module.js";
 import { ProjectsModule } from "./projects/projects.module.js";
 import { ProvidersModule } from "./providers/providers.module.js";
 
@@ -21,7 +22,9 @@ import { ProvidersModule } from "./providers/providers.module.js";
  * `market-study` (Module 1 — population + competition + a demand index,
  * gated behind `geo.data_coverage_cell`'s real coverage-tier signal); B-13
  * adds `layout` (Module 4 — a read-only parameter endpoint, since the zone
- * allocation itself runs client-side in `@sodeja/calc`).
+ * allocation itself runs client-side in `@sodeja/calc`); B-18 adds `permits`
+ * (Module 12 — a read-only checklist over B-10's rule interpreter; the
+ * README's placeholder name for it was `rules`).
  */
 @Module({
   imports: [
@@ -34,6 +37,7 @@ import { ProvidersModule } from "./providers/providers.module.js";
     GeoModule,
     LayoutModule,
     MarketStudyModule,
+    PermitsModule,
   ],
 })
 export class AppModule {}

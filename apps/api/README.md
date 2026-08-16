@@ -29,7 +29,7 @@ product modules and gives real boundaries at no runtime cost. Validation via
 | `capacity` | 6 | **Implemented (B-12).** `POST /projects/:id/capacity-estimate` — see "B-12 contract" below |
 | `costs` | 9, 10 | **Implemented (B-14 + B-15).** `POST /projects/:id/fitout-estimate`, `POST /projects/:id/opex-estimate` — see "B-14/B-15 contract" below |
 | `finance` | 7 | **Implemented (B-17).** `POST /projects/:id/financial-projection` — the integration point. See "B-17 contract" below |
-| `rules` | 12 | Not built. Permit checklist evaluation |
+| `permits` | 12 | **Implemented (B-18), read-only.** `GET /projects/:id/permits-checklist` — see "B-18 contract" below. Named `rules` in earlier drafts of this table; the NestJS module is `permits`, since `@sodeja/rules` is the package it calls into |
 | `reports` | 13 | Not built. Enqueues work; does not render |
 | `legal` | — | Not built. ToS acceptance, Ley 172-13 consent, export/delete |
 | `providers` | — | **Implemented (B-3).** Server-side proxy for all external map/POI providers |
@@ -389,8 +389,11 @@ unit) when any line never reaches break-even in one of its variants —
 
 `resultsJson.disclaimer` always carries the non-dismissible "this is a
 projection, not audited, not financial advice" caveat (risk L1).
-`rule_pack_ids` is always `'{}'` — no permit/tax `content.rule_pack` rows
-exist yet (B-18/B-11 seeded only parameter values).
+`rule_pack_ids` is always `'{}'`. B-18 has since seeded `domain='permits'`
+rule packs, but the projection consumes none of them — it reads
+`content.parameter_value` (tax/labor rates) only, and a permits pack
+contributes nothing to the arithmetic. It is not a stale empty array to be
+backfilled.
 
 ## B-7 contract — `geo` (`src/geo/`)
 
@@ -460,6 +463,60 @@ dataset — risk D2), not a fallback: `competitorsUserAdded` is preserved
 across a recomputation (a `POST` never resets it), and factors into
 `demandIndex`'s total-competitor denominator. `404`s if no market study has
 been computed for the project yet.
+
+## B-18 contract — `permits` (`src/permits/`)
+
+**`GET /projects/:id/permits-checklist`** → `PermitChecklist`
+(`@sodeja/schemas`). A pure read, like `layout`: the service computes nothing
+itself, it calls `evaluatePermits` (`packages/rules/src/evaluate.ts`), which
+fetches the jurisdiction chain plus every in-force `domain='permits'` rule
+pack/rule/citation and hands them to B-10's pure `evaluatePermitRules`
+interpreter.
+
+**The response is non-exhaustive by construction and is not legal advice.**
+`isExhaustive` is the Zod literal `false` — no future change can flip it by
+accident — and `disclaimerEs` must be rendered as visible copy, never behind
+a tooltip. `requirement` is `required | likely_required | not_applicable |
+unknown` and must never gain a `compliant`/`cleared` member (risk L3): a
+false all-clear can cost a user their fit-out capital. The non-exhaustiveness
+is a legal fact, not a hedge — Ley 176-07 Art. 16, cited on the
+municipal-licence item itself, says a licence from one public body never
+exempts its holder from the others, and several real requirements were
+deliberately left unseeded (see the header of
+`packages/db/migrations/1785560000000_seed-permits-content.sql`).
+
+`jurisdictionSlug` and `rulePackVersion` are per ITEM, not per checklist: one
+response mixes national rules with municipal overrides that version
+independently. The seeded example is `uso-suelo` — the Distrito Nacional's
+"Certificación de Uso de Suelo" (Dirección de Planeamiento Urbano) versus
+Santiago's "No Objeción al Uso de Suelo" (OMPU). The municipal row wins on
+shared `code`, so the national default is replaced rather than listed
+alongside it.
+
+Facts passed to the interpreter are `{ businessTypeSlug }` and nothing else —
+it is the only fact any seeded rule keys on (the two food-handling rules). A
+fact this endpoint cannot supply is never faked: an absent fact makes a
+conditional rule not fire, which is the safe direction, whereas a guessed one
+manufactures a requirement.
+
+Gated behind `requireConfirmedArea` (B-7a) like every estimate module — not
+because permits are computed from the area, but because confirming the
+location is where the project's jurisdiction is resolved, and a checklist for
+the wrong municipality names offices that will not process the applicant.
+`409` on an unconfirmed area, a null `jurisdiction_id`, or a null
+`business_type_id`; `404` if the project is not the caller's.
+
+A non-empty `failures` array from the interpreter means seeded content is
+malformed, so the endpoint `500`s naming the offending rule codes (full
+interpreter messages go to the log only) rather than serving a silently
+shortened legal checklist.
+
+`app.permit_checklist_item` stays EMPTY. That table is designed for a
+materialized checklist with per-item `user_marked_done` tracking, and the
+OpenAPI spec has a matching `PATCH`; both are deferred because they need a
+product decision B-18 does not contain — when the checklist freezes, and what
+happens to a user's ticked boxes once the underlying rule pack is superseded.
+This endpoint recomputes on every call.
 
 ## Architectural rules
 

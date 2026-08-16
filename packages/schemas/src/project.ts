@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CurrencySchema, ProvenanceSchema, ResolvedParameterSchema } from "./primitives.js";
+import { CitationSchema, CurrencySchema, ProvenanceSchema, ResolvedParameterSchema } from "./primitives.js";
 
 /**
  * B-11a wire contract: one row per `app.project_assumption`
@@ -425,7 +425,11 @@ export const FinancialProjectionSchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
   engineVersion: z.string().min(1),
-  /** Always `[]` — no permit/tax `content.rule_pack` rows exist yet (B-18/B-11 seeded only parameter values, never a rule pack). */
+  /**
+   * Always `[]`. B-18 has since seeded `domain='permits'` rule packs, but the
+   * projection consumes none of them — it reads `content.parameter_value`
+   * (tax/labor rates) only. Not a stale empty array awaiting a backfill.
+   */
   rulePackIds: z.array(z.number().int()),
   asOfDate: z.string(),
   fxUsdDop: z.number().nullable(),
@@ -445,3 +449,84 @@ export const FinancialProjectionSchema = z.object({
   computedAt: z.string().datetime(),
 });
 export type FinancialProjection = z.infer<typeof FinancialProjectionSchema>;
+
+// =========================================================================
+// B-18 — permits checklist (Module 12)
+// =========================================================================
+
+/**
+ * Mirrors `content.permit_requirement` (specs/db/schema.sql) and
+ * `PermitRuleResult['requirement']` in `@sodeja/rules`. There is deliberately
+ * no `'compliant'` / `'cleared'` / `'done'` member, and this enum must never
+ * gain one (risk L3, docs/SODEJA_RISKS.md; see packages/rules/src/permits.ts's
+ * own comment). A false all-clear here can cost a user their fit-out capital,
+ * so the vocabulary can only say what applies to them and who to ask — never
+ * that they are finished.
+ */
+export const PermitRequirementSchema = z.enum([
+  "required",
+  "likely_required",
+  "not_applicable",
+  "unknown",
+]);
+export type PermitRequirement = z.infer<typeof PermitRequirementSchema>;
+
+/**
+ * One evaluated permit rule. Structurally identical to `@sodeja/rules`'s
+ * `PermitRuleResult` — this is that type's wire contract, named after the
+ * checklist row it becomes rather than after the engine that produced it.
+ *
+ * `jurisdictionSlug` and `rulePackVersion` are per ITEM, not per checklist: a
+ * single response mixes rules from the national pack with municipal overrides
+ * (the `uso-suelo` rule is the seeded example — DN issues a "Certificación de
+ * Uso de Suelo", Santiago a "No Objeción al Uso de Suelo"), and those packs
+ * version independently. A client that wants to show "which rulebook is this
+ * from" must read it off the item.
+ */
+export const PermitChecklistItemSchema = z.object({
+  /** `content.rule.code`, stable across rule-pack versions — the client's key for an item. */
+  ruleCode: z.string().min(1),
+  titleEs: z.string().min(1),
+  descriptionEs: z.string().nullable(),
+  requirement: PermitRequirementSchema,
+  /** Who to ask. Null when the rule's source names no single competent body. */
+  agencyName: z.string().nullable(),
+  citation: CitationSchema,
+  /** `content.rule_pack.valid_from` as YYYY-MM-DD — when this content was published, not when the law took force (that is `citation.effectiveDate`). */
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable(),
+  jurisdictionSlug: z.string().min(1),
+  rulePackVersion: z.number().int(),
+});
+export type PermitChecklistItem = z.infer<typeof PermitChecklistItemSchema>;
+
+/**
+ * `GET /projects/:id/permits-checklist` — every permit rule in force for the
+ * project's jurisdiction chain and business type, as of today.
+ *
+ * `isExhaustive` is `false` and can only ever be `false` (a `z.literal`, not a
+ * boolean, so no future change can make it true by accident). It is not
+ * decoration: Ley 176-07 Art. 16 — cited on the municipal-licence item itself
+ * — says in law that a licence from one public body never exempts its holder
+ * from the others, and several real requirements were deliberately left
+ * unseeded because no primary text could be verified for them (see the header
+ * of packages/db/migrations/1785560000000_seed-permits-content.sql). A client
+ * MUST render `disclaimerEs` as visible copy, never behind a tooltip, and must
+ * never present the list as a completeness or compliance check.
+ *
+ * `items` is legitimately a short list, and an item's absence is never
+ * evidence that a permit does not apply.
+ */
+export const PermitChecklistSchema = z.object({
+  items: z.array(PermitChecklistItemSchema),
+  /** The project's own jurisdiction — the most specific one in the chain the rules were resolved against. */
+  jurisdictionSlug: z.string().min(1),
+  jurisdictionName: z.string().min(1),
+  /** The fact the conditional (food-handling) rules were evaluated against. */
+  businessTypeSlug: z.string().min(1),
+  /** The date the rule packs' validity window was evaluated at (YYYY-MM-DD). */
+  asOfDate: z.string(),
+  isExhaustive: z.literal(false),
+  disclaimerEs: z.string().min(1),
+});
+export type PermitChecklist = z.infer<typeof PermitChecklistSchema>;
