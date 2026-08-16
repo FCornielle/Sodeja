@@ -1,6 +1,19 @@
 # `services/pdf-worker` — Report Rendering Service
 
-**Status: placeholder. No implementation.**
+**Status: implemented (B-19), as a LIBRARY `apps/api`'s `reports` module
+imports (`@sodeja/pdf-worker`) — not yet the separate deployable process
+this document describes below.** No Redis/queue infrastructure is
+provisioned anywhere in this codebase, so B-19 dispatches the render job
+in-process via an in-memory queue (`src/queue.ts`) rather than standing up
+a second process talking to a broker. See `apps/api/README.md`'s "B-19
+contract" section for the full write-up (what is hard-blocking vs.
+gracefully degraded, the queue's known limitations, and what a real
+BullMQ+Redis + separate-process migration would need to change) and this
+package's own `src/` files for the pure rendering pipeline (React SSR via
+`react-dom/server` -> Playwright -> PDF), the filesystem storage driver
+(`src/storage.ts`), and the queue (`src/queue.ts`) — each documents in its
+own header exactly which parts of the diagram below it does NOT yet
+implement.
 
 Carved out of the monolith **from day one**. Chromium is memory-hungry and slow
 to start; sharing a process with the API means one large report degrades every
@@ -27,6 +40,16 @@ on Chromium.
 permitted only within the existing $300 GCP credit balance. Signed-URL issuance
 is part of the storage interface, so the `downloadUrl` contract is identical
 across drivers. No paid storage plan without product-owner approval.
+
+**B-19's actual implementation of this**: the filesystem driver
+(`src/storage.ts`) does NOT issue a real signed URL — there is no separate
+object-storage service to mint one against for a plain local directory.
+`GET /projects/:id/reports/:reportId/download` is a direct, authenticated
+download instead (protected by the same ownership check as every other
+project route), documented explicitly in `storage.ts`'s header as a
+simplification appropriate to local/free storage, not a substitute
+security feature. A future `STORAGE_DRIVER=gcs` driver would need genuine
+signed-URL issuance behind the same `ReportStorage` interface (`src/types.ts`).
 
 ## Why Chromium rather than a PDF DSL
 
