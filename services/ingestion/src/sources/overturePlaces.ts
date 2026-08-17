@@ -128,8 +128,19 @@ async function openConnection(): Promise<DuckDbConnection> {
   // from this file's sibling modules (e.g. transform/poiPlaceRow.ts, or
   // this package's index.ts re-exports) do not pay for loading duckdb's
   // native binding unless a POI ingestion actually runs.
-  const duckdb = await import("duckdb");
-  const db = new duckdb.Database(":memory:");
+  //
+  // `duckdb` is CJS-only. Under vitest's transform, `import("duckdb")`
+  // happens to expose `Database` directly on the namespace object (vite's
+  // CJS interop unwraps it), which is what this package's own tests run
+  // against — but under plain Node ESM (`node dist/cli.js`, the real CLI
+  // entrypoint), the same import only exposes a `default` property holding
+  // the CJS module's exports, so `duckdb.Database` is `undefined` there.
+  // Checking both shapes handles whichever interop the runtime actually did,
+  // rather than depending on Node and vitest producing byte-identical
+  // results for a CJS module (they do not, for this specific package).
+  const duckdbModule = await import("duckdb");
+  const { Database } = (duckdbModule.default ?? duckdbModule) as typeof import("duckdb");
+  const db = new Database(":memory:");
   const con = db.connect();
   await run(con, "INSTALL spatial; LOAD spatial;");
   await run(con, "INSTALL httpfs; LOAD httpfs;");
