@@ -10,6 +10,7 @@ interface Props {
   onNavigateToConfirm: () => void;
   onNavigateToFitout: () => void;
   onNavigateToOpex: () => void;
+  onNavigateToCapacity: () => void;
 }
 
 interface MissingBody {
@@ -44,16 +45,24 @@ function isMissingBody(body: unknown): body is MissingBody {
  *
  * The prerequisites-missing `409` is rendered as a real checklist
  * (`BlockedChecklist` below), per the spec: "each deep-linking back to its
- * step." One entry, `capacity_estimate`, has no real screen to deep-link to
- * in THIS app — Module 6's capacity UI is out of scope for this change (see
- * this task's report). Rather than leave that item a dead end, its row
- * offers a minimal inline action that calls `POST
- * /projects/:id/capacity-estimate` directly (it needs nothing but an
- * optional staff count) — a small, deliberate scope call, not the full
- * "Distribución preliminar / Capacidad estimada" screen the UX spec
- * describes for Step 5.
+ * step." All four entries — `confirmed_area`, `fitout_estimate`,
+ * `opex_estimate`, `capacity_estimate` — now deep-link to a real screen:
+ * `capacity_estimate` used to fall back to a minimal inline "unblock" action
+ * here (this app had no capacity screen at all), but that shortcut is gone
+ * now that `CapacityEstimateStep.tsx` exists and sits earlier in
+ * `ProjectFlow.tsx`'s sequence (right after `layout`, well before this
+ * step) — a project reaching this screen the normal way already has a
+ * capacity estimate, so this entry is expected to be the rare case, not the
+ * default path it used to be.
  */
-export function ProjectionStep({ projectId, onContinue, onNavigateToConfirm, onNavigateToFitout, onNavigateToOpex }: Props) {
+export function ProjectionStep({
+  projectId,
+  onContinue,
+  onNavigateToConfirm,
+  onNavigateToFitout,
+  onNavigateToOpex,
+  onNavigateToCapacity,
+}: Props) {
   const [state, setState] = useState<State>({ kind: "form" });
   const [low, setLow] = useState("");
   const [base, setBase] = useState("");
@@ -109,8 +118,8 @@ export function ProjectionStep({ projectId, onContinue, onNavigateToConfirm, onN
           onNavigateToConfirm={onNavigateToConfirm}
           onNavigateToFitout={onNavigateToFitout}
           onNavigateToOpex={onNavigateToOpex}
+          onNavigateToCapacity={onNavigateToCapacity}
           onRetry={handleSubmit}
-          projectId={projectId}
         />
       )}
 
@@ -195,15 +204,15 @@ function BlockedChecklist({
   onNavigateToConfirm,
   onNavigateToFitout,
   onNavigateToOpex,
+  onNavigateToCapacity,
   onRetry,
-  projectId,
 }: {
   missing: string[];
   onNavigateToConfirm: () => void;
   onNavigateToFitout: () => void;
   onNavigateToOpex: () => void;
+  onNavigateToCapacity: () => void;
   onRetry: () => void;
-  projectId: string;
 }) {
   return (
     <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -227,61 +236,16 @@ function BlockedChecklist({
                 Ir a costos operativos
               </button>
             )}
-            {item.includes("capacity_estimate") && <InlineCapacityAction projectId={projectId} onDone={onRetry} />}
+            {item.includes("capacity_estimate") && (
+              <button type="button" onClick={onNavigateToCapacity} className="mt-1 font-medium text-blue-600 underline">
+                Ir a capacidad estimada
+              </button>
+            )}
           </li>
         ))}
       </ul>
       <button type="button" onClick={onRetry} className="mt-3 font-medium text-blue-600 underline">
         Reintentar ahora
-      </button>
-    </div>
-  );
-}
-
-/**
- * A minimal unblock, not the full Step 5 capacity screen — see this file's
- * header comment. `staffCount` is optional on `POST
- * /projects/:id/capacity-estimate`; omitting it still creates a row (with
- * `staff_*` left null), which is enough to satisfy this gate.
- */
-function InlineCapacityAction({ projectId, onDone }: { projectId: string; onDone: () => void }) {
-  const [staffCountText, setStaffCountText] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState(false);
-
-  async function handleClick(): Promise<void> {
-    setSubmitting(true);
-    try {
-      const staffCount = staffCountText.trim().length > 0 ? Number(staffCountText) : undefined;
-      await apiFetch(`/projects/${projectId}/capacity-estimate`, { method: "POST", body: { staffCount } });
-      setDone(true);
-      onDone();
-    } catch {
-      // Left as a retryable state — the button re-enables via `finally`.
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (done) return <p className="mt-1 text-xs text-green-700">Estimación de capacidad creada.</p>;
-
-  return (
-    <div className="mt-1 flex items-center gap-2">
-      <input
-        type="number"
-        min={0}
-        placeholder="Personal (opcional)"
-        value={staffCountText}
-        onChange={(e) => setStaffCountText(e.target.value)}
-        className="w-32 rounded border border-neutral-300 px-2 py-1 text-xs"
-      />
-      <button
-        type="button"
-        disabled={submitting}
-        onClick={handleClick}
-        className="rounded border border-blue-600 px-2 py-1 text-xs font-medium text-blue-600 disabled:opacity-40"
-      >
-        Calcular capacidad ahora
       </button>
     </div>
   );
