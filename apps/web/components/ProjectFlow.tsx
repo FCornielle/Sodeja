@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ProjectLocation } from "@sodeja/schemas";
 import type { LocationDraft } from "../lib/types";
+import { CapacityEstimateStep } from "./capacity/CapacityEstimateStep";
 import { ConfirmAreaStep } from "./confirm/ConfirmAreaStep";
 import { PoiLabelStep } from "./confirm/PoiLabelStep";
 import { FitoutEstimateStep } from "./costs/FitoutEstimateStep";
@@ -18,6 +19,7 @@ type FlowStep =
   | "confirm"
   | "poi-label"
   | "layout"
+  | "capacity"
   | "market-study"
   | "fitout"
   | "opex"
@@ -25,11 +27,11 @@ type FlowStep =
   | "summary";
 
 /**
- * The primary flow (specs/ux/flows.md), Steps 1-3 and 6-9, in this app's
- * ACTUAL order: location → confirm → poi-label → layout → market-study →
- * fitout → opex → projection → summary. Two deliberate deviations from the
- * spec's numbered order, both already forced by decisions made outside this
- * file:
+ * The primary flow (specs/ux/flows.md), Steps 1-3 and 5-9, in this app's
+ * ACTUAL order: location → confirm → poi-label → layout → capacity →
+ * market-study → fitout → opex → projection → summary. Three deliberate
+ * deviations from the spec's numbered order, all already forced by decisions
+ * made outside this file (the third by this change itself):
  *
  * 1. Step 4 (business type) and the jurisdiction it implies do NOT appear
  *    here at all — they are answered BEFORE this component ever mounts, on
@@ -45,10 +47,15 @@ type FlowStep =
  *    for this change). Market study's own real prerequisite — a confirmed
  *    area — is satisfied regardless of exactly where in this sequence it
  *    runs.
- *
- * Step 5's capacity half (Module 6) has no screen in this app — see
- * `ProjectionStep.tsx`'s doc comment for the one place that gap is worked
- * around (a minimal inline "unblock" action, not a full capacity screen).
+ * 3. `capacity` (Step 5's other half, Module 6, B-12) runs right after
+ *    `layout` and before `market-study`/the costs section — both because it
+ *    is the other half of the same spec step as `layout`, and because
+ *    `opex.service.ts` and `GET /projects/:id/layout-parameters`
+ *    (`expectedOccupants`) both read the latest `capacity_estimate.staff_*`
+ *    when one exists. `LayoutZonesStep` itself still runs first, so its own
+ *    `expectedOccupants` plausibility comparison sees `null` on a fresh
+ *    project either way — reordering `layout` ahead of `capacity` was out of
+ *    scope for this change (see `CapacityEstimateStep.tsx`'s doc comment).
  *
  * B-18's permits checklist is built and reachable, but stays a link out of
  * `SummaryExportStep` rather than an appended step — same reasoning this
@@ -89,6 +96,16 @@ export function ProjectFlow({ projectId }: { projectId: string }) {
   if (step === "layout") {
     return (
       <LayoutZonesStep
+        projectId={projectId}
+        onContinue={() => setStep("capacity")}
+        onBackToConfirm={() => setStep("confirm")}
+      />
+    );
+  }
+
+  if (step === "capacity") {
+    return (
+      <CapacityEstimateStep
         projectId={projectId}
         onContinue={() => setStep("market-study")}
         onBackToConfirm={() => setStep("confirm")}
@@ -134,6 +151,7 @@ export function ProjectFlow({ projectId }: { projectId: string }) {
         onNavigateToConfirm={() => setStep("confirm")}
         onNavigateToFitout={() => setStep("fitout")}
         onNavigateToOpex={() => setStep("opex")}
+        onNavigateToCapacity={() => setStep("capacity")}
       />
     );
   }
