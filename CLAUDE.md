@@ -38,6 +38,13 @@ e2e/            Playwright + fixtures de Google
 
 Operaciones espaciales con **Turf.js en JavaScript**, no en SQL.
 
+> **Turf.js nunca recibe coordenadas de Places.** Los ToS §3.2.3(c)(iv) prohíben
+> literalmente usar lat/lng de Places API como entrada de un análisis
+> punto-en-polígono. La competencia se filtra por radio (`locationRestriction`
+> circular, resuelto en el servidor de Google); la población alcanzable
+> intersecta la isócrona con geometría censal de la ONE, cuyos puntos no son de
+> Google. Ver D-14.
+
 ## Las cuatro reglas que no se rompen
 
 ### 1. Las claves
@@ -52,13 +59,18 @@ través de un Route Handler propio.
 
 ### 2. Los field masks deciden la factura
 
-En Places API (New), `X-Goog-FieldMask` determina el tier de facturación.
-Añadir `rating` o `priceLevel` sube la llamada de Pro (5.000 gratis/mes) a
-Enterprise (**1.000 gratis/mes**).
+En Places API (New), `X-Goog-FieldMask` determina el tier de facturación. Son
+**cuatro tiers**, no tres: Essentials → Pro → Enterprise → **Enterprise +
+Atmosphere**. Añadir `rating` sube de Pro (5.000 gratis/mes) a Enterprise (1.000);
+añadir `reviews` o cualquier booleano de atributo sube a Enterprise + Atmosphere.
 
-Las máscaras son constantes en `lib/google/fieldMasks.ts`. **Nunca inline,
-nunca concatenadas dinámicamente.** Hay un test que falla si una llamada Pro
-incluye un campo Enterprise.
+Las máscaras son constantes en `lib/google/fieldMasks.ts`. **Nunca inline, nunca
+concatenadas dinámicamente.** Hay tests que fallan si una máscara excede su tier
+declarado, y si alguna pide `generativeSummary` o `neighborhoodSummary` — que en
+RD facturan y devuelven `null`.
+
+**Compute Route Matrix factura por elemento, no por llamada.** 1 origen × 24
+sondas = 24 elementos. El medidor cuenta elementos.
 
 ### 3. Los ToS de Google definen el esquema de datos
 

@@ -173,3 +173,165 @@ se decide, antes del 2026-10-07, si conviene convertir la cuenta de facturación
 El modo de fallo que previene es concreto: un field mask con `rating` de más
 convierte una llamada Pro (5.000 gratis/mes) en Enterprise (1.000 gratis/mes)
 sin que nada lo advierta.
+
+---
+
+## D-11 · La caracterización se apoya en `reviewSummary`, no en NLP propio — 2026-08-19
+
+**Contexto.** El dueño pidió que cada estudio caracterice el tipo de negocio
+"analizando hasta los comentarios", tomando como referencia su proyecto
+`santo-domingo-restaurant-reviews-nlp`: 4.955 reseñas en español, sentimiento,
+nubes de palabras, 500+ restaurantes.
+
+Ese proyecto obtuvo el corpus con **Selenium**. Es scraping, y los ToS §3.2.3(a)
+nombran *"user reviews"* literalmente entre lo prohibido. No se puede replicar.
+
+**Los dos agentes discreparon.** `esodeja-pm` vetó descargar reseñas en
+absoluto, incluso las que Places permite: con n≤5 por lugar, cualquier
+porcentaje de sentimiento es ruido con apariencia de medición. `esodeja-maps`
+encontró una tercera vía que el PM no conocía.
+
+**Decisión.** Se adopta la vía de `esodeja-maps`, que satisface la petición del
+dueño sin violar los ToS ni fabricar precisión falsa:
+
+1. **`reviewSummary`** — Google produce él mismo la síntesis de las reseñas, en
+   español, con **cobertura verificada de República Dominicana**. Se muestra en
+   vivo, no se persiste, y lleva su `disclosureText` ("Resumido con Gemini") y
+   su `reviewsUri` visibles, que son de exhibición obligatoria.
+2. **Las reseñas literales se muestran como texto citado**, con
+   `authorAttribution` y enlace a Google Maps. Para leerlas, no para agregarlas.
+3. **No se calcula ningún porcentaje de sentimiento.** Ni por lugar, ni por
+   zona, ni por estudio.
+4. **No se persiste ningún texto de reseña ni derivado por lugar.**
+
+**Por qué el veto del PM se revoca parcialmente.** Su razonamiento era correcto
+sobre la premisa que tenía: que la única forma de usar reseñas era calcular
+sentimiento. `reviewSummary` es una cuarta opción — síntesis producida por
+Google, no derivada por nosotros — que no existía en su análisis. Su protección
+central se conserva íntegra: **ningún porcentaje sobre muestra sesgada**.
+
+**La aritmética que respalda el punto 3.** Con n=5 y p=0,5, el error estándar es
+0,224 → intervalo al 95% de **±44 puntos porcentuales**. Un lugar "70% positivo"
+es estadísticamente indistinguible de uno "30% positivo". Y la muestra no es
+aleatoria: Google devuelve las 5 *"sorted by relevance"*, con una función no
+documentada. Un sesgo desconocido no se corrige.
+
+Nota incómoda: el 86,8% positivo del proyecto de referencia **tampoco es un
+valor fiable**. Selenium raspa lo que la página renderiza, y Google también
+ordena eso por relevancia. Es el mismo sesgo con más filas.
+
+**Prohibido de forma nominal.** ToS §3.2.3(c)(vii) prohíbe usar contenido de
+Maps para *"train, test, validate or fine-tune"* modelos. **No se puede
+fine-tunear un clasificador de sentimiento en español dominicano sobre reseñas
+de Google.** Esa era la ruta natural desde el proyecto de referencia y está
+cerrada sin interpretación.
+
+**Condición de reapertura.** Que Google publique una API de reseñas con volumen
+y permiso de almacenamiento.
+
+---
+
+## D-12 · El eje cambia: de lo que dicen los clientes a lo que hacen los competidores — 2026-08-19
+
+**Decisión.** El entregable de caracterización deja de ser *"qué opinan los
+clientes"* y pasa a ser *"qué hacen los competidores y dónde están los huecos"*.
+
+**Por qué.** Es lo que la API permite medir bien, y responde mejor la pregunta
+que el dueño realmente tiene. `MASK_ATMOSPHERE` devuelve **30+ atributos
+operativos verificados** por competidor: delivery, terraza, reservas, parking,
+medios de pago, accesibilidad, franjas de servicio. El proyecto de referencia no
+tenía nada de esto.
+
+| Dimensión del proyecto NLP | En Esodeja | Veredicto |
+|---|---|---|
+| Densidad por barrio (15 barrios) | Conteo por anillo, excluyendo cerrados | **Mejor** — radios exactos desde el pin |
+| Distribución de cocina | Mezcla de `primaryType` | **Equivalente y más limpia** — taxonomía cerrada |
+| Segmentación de precio | `priceLevel` + `priceRange` **en DOP** | **Superior** — el original solo tenía el símbolo `$` |
+| Rating por zona | `rating` + `userRatingCount` | **Superior** — parámetros poblacionales, sin error de muestreo |
+| Sentimiento sobre 4.955 reseñas | `reviewSummary` + reseñas citadas | **Degradado** — cualitativo, no cuantificable |
+| Nubes de palabras | — | **Imposible** — exige corpus almacenado |
+| — | **Censo de 30+ atributos operativos** | **NUEVO** |
+| — | **Tasa de cierre** vía `businessStatus` | **NUEVO** — mortalidad sectorial georreferenciada |
+
+*"34 de 40 competidores hacen delivery; solo 6 tienen terraza; ninguno abre
+desayunos"* es un output que Selenium nunca produjo y que responde directamente
+a la pregunta de diferenciación.
+
+**El resumen honesto para el dueño:** se pierde la nube de palabras; se gana el
+mapa de huecos operativos y la tasa de cierre. Los dos proyectos no compiten —
+el NLP fue un estudio retrospectivo de un sector, irrepetible legalmente;
+Esodeja es una herramienta prospectiva sobre una ubicación, repetible.
+
+---
+
+## D-13 · Dos etiquetas de procedencia para datos de Google, no una — 2026-08-19
+
+**Decisión.** Se separa `google-places` en dos etiquetas con reglas distintas:
+
+| Etiqueta | Campos | Cómo se muestra |
+|---|---|---|
+| `google-places-censo` | `rating`, `userRatingCount`, `priceLevel`, `priceRange`, conteos, atributos, `businessStatus` | Como cifra. Entra en la proyección financiera |
+| `google-places-muestra` | `reviews`, `reviewSummary`, `editorialSummary` | Como **texto citado**. Nunca como porcentaje |
+
+**Por qué.** `rating` es la media de Google sobre **todas** las valoraciones del
+lugar: un parámetro poblacional sin error de muestreo. `reviews` es una muestra
+sesgada de tamaño 5. Darles la misma etiqueta invita a tratarlos con la misma
+confianza, que es exactamente el fallo que `ranges-and-provenance` existe para
+prevenir.
+
+Todo lo etiquetado `google-places-muestra` lleva al lado, literal:
+
+> **Muestra no representativa** — Google entrega un máximo de 5 reseñas por
+> lugar, seleccionadas por su propio criterio de relevancia. Sirven como
+> ilustración cualitativa. No se ha calculado ningún porcentaje sobre ellas.
+
+---
+
+## D-14 · Turf.js no toca coordenadas de Places — 2026-08-19
+
+**Contexto.** D-4 eligió Turf.js para geometría y citó "punto-en-polígono" entre
+sus usos. CLAUDE.md dice "operaciones espaciales con Turf.js".
+
+**El problema.** ToS §3.2.3(c)(iv) lista como ejemplo explícitamente prohibido:
+
+> *use latitude/longitude values from the Places API as an input for
+> **point-in-polygon analysis***
+
+La ruta de implementación obvia es la prohibida. Esto no se detectó al escribir
+D-4 y habría entrado en el código sin que nadie lo notara.
+
+**Decisión.** Tres reglas, ninguna de las cuales cuesta capacidad:
+
+1. **La competencia se filtra por radio, nunca por polígono.** El
+   `locationRestriction` circular de Nearby Search ya lo resuelve en el servidor
+   de Google. No hay nada que hacer en Turf.
+2. **Población alcanzable = polígono de isócrona ∩ geometría censal de la ONE.**
+   El conjunto de puntos es de la ONE, no de Places: la cláusula no aplica.
+3. **Nunca** pasar `places.location` a `turf.booleanPointInPolygon` ni a
+   `turf.pointsWithinPolygon`.
+
+**Verificación pendiente.** `esodeja-qa` debe añadir un test que falle si algún
+fichero pasa un valor procedente de `lib/google/` a esas dos funciones de Turf.
+
+---
+
+## D-15 · Corrección de D-6: la isócrona es la partida más cara, no la más barata — 2026-08-19
+
+**Contexto.** D-6 afirma que la isócrona "cuesta 1 llamada Pro por modo y
+umbral".
+
+**El error.** Compute Route Matrix **factura por elemento**, verbatim de Google:
+*"billed per ELEMENT returned from the request. The number of elements is the
+number of origins multiplied by the number of destinations."*
+
+1 origen × 24 sondas = **24 elementos facturables**. La isócrona cuesta
+**$0,120**, no $0,005 — un factor **24×**. Con dos modos de transporte y dos
+umbrales son 96 elementos ($0,48), **más que todo el resto del estudio junto**.
+
+**Decisión.** El método de D-6 se mantiene: sigue siendo asequible (416
+estudios/mes dentro del umbral gratuito) y no hay alternativa. Lo que cambia es
+que **el medidor de coste de E-3 debe contar elementos, no llamadas**.
+
+Sin esa corrección, la reconciliación del ±20% contra Cloud Billing fallaría por
+un factor 24 en esa partida, y se culparía a la tabla de precios en vez de al
+medidor.
