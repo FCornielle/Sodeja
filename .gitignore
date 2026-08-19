@@ -1,0 +1,31 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Secretos: nunca se commitean. Solo .env.local.example entra al repo.
+.env
+.env.local
+.env*.local
+
+# Base de datos local (contiene coordenadas cacheadas de Google, ver ToS)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+
+# Tests
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+coverage/
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+next-env.d.ts
+tsconfig.tsbuildinfo
