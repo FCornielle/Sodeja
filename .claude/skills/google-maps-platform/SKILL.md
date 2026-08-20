@@ -1,6 +1,6 @@
 ---
 name: google-maps-platform
-description: Referencia operativa de Google Maps Platform para Esodeja — SKUs y tiers de facturación, field masks canónicos de Places API (New), reglas de caché y atribución de los Términos de Servicio, patrón de medición de coste, y las limitaciones conocidas de la plataforma (no hay API de isócronas). Carga esta skill ANTES de escribir o modificar cualquier código que llame a googleapis.com o que diseñe una tabla que almacene datos de Places.
+description: Referencia operativa de Google Maps Platform para Esodeja — SKUs y tiers de facturación, field masks canónicos de Places API (New), reglas de caché y atribución de los Términos de Servicio, patrón de medición de coste, y las limitaciones y novedades de la plataforma (Isochrones API en Preview). Carga esta skill ANTES de escribir o modificar cualquier código que llame a googleapis.com o que diseñe una tabla que almacene datos de Places.
 ---
 
 # Google Maps Platform — referencia operativa de Esodeja
@@ -273,10 +273,27 @@ dispara por encima de $1, hay una máscara mal puesta o un bucle de llamadas.
 
 ## 6. Limitaciones de la plataforma que sorprenden
 
-### Google no tiene API de isócronas
+### Google SÍ tiene API de isócronas (desde 2026) — usa esa
 
-No existe endpoint que devuelva "el polígono alcanzable en 10 minutos". La
-aproximación de Esodeja:
+**Corrección a una versión anterior de esta skill, que afirmaba lo contrario.**
+Existe la **Isochrones API**, método `GenerateIsochrone`: devuelve un polígono
+real consciente de la red viaria, no una aproximación.
+
+| | Detalle |
+|---|---|
+| Estado | **Preview (pre-GA)** — soporte limitado, posibles cambios incompatibles |
+| Coste | **$0,00 durante Preview.** Al pasar a GA, por 1.000 peticiones, dentro de Essentials y Pro |
+| Modos | `DRIVE`, `WALK`, `BICYCLE` |
+| Límites | 3.600 s en `DRIVE` · 7.200 s en `WALK` y `BICYCLE` |
+| Cobertura por país | **No declarada en la documentación.** Que funcione en RD es un supuesto sin verificar |
+
+Es simultáneamente **más exacta y más barata** que la aproximación anterior. Ver
+D-16. Verifica cobertura de RD con una llamada real antes de construir encima.
+
+<details>
+<summary>Método anterior (abanico radial) — plan B si Isochrones no cubre RD o rompe en Preview</summary>
+
+La aproximación de Esodeja antes de que existiera Isochrones API:
 
 1. Generar ~24 puntos de sonda en abanico radial alrededor del origen.
 2. **Una sola** llamada a Compute Route Matrix (1 origen × 24 destinos).
@@ -292,9 +309,12 @@ Es una **aproximación** y la UI debe etiquetarla como tal.
 > **$0,120**, no $0,005. Con dos modos y dos umbrales serían 96 elementos
 > ($0,48) — más que todo el resto del estudio junto.
 >
-> **La isócrona es la partida más cara de Esodeja.** El medidor de coste debe
-> contar **elementos**, no llamadas, o la reconciliación del ±20% contra Cloud
-> Billing fallará y se culpará a la tabla de precios en vez de al medidor.
+> Con este método la isócrona era la partida más cara de Esodeja. Aun así, la
+> regla de **contar elementos y no llamadas** sigue vigente para cualquier uso de
+> Route Matrix, o la reconciliación del ±20% contra Cloud Billing fallará y se
+> culpará a la tabla de precios en vez de al medidor.
+
+</details>
 
 ### Places Insights está fuera de alcance
 

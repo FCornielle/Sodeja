@@ -201,18 +201,20 @@ explícito y editable.
 |---|---|---|---|
 | Censo de competencia | Nearby Search Enterprise | 6 llamadas | $0,210 |
 | Caracterización | Nearby Search Ent. + Atmosphere | 2 llamadas | $0,080 |
-| Isócrona | Compute Route Matrix | **24 elementos** | $0,120 |
+| Isócrona | **Isochrones API** *(Preview)* | 2 llamadas | **$0,000** |
 | Contexto | Geocoding + Dynamic Maps | 2 | $0,012 |
-| | | **Total** | **≈ $0,42** |
+| | | **Total** | **≈ $0,30** |
 
 **Coste marginal real: $0,00.** Los umbrales gratuitos son por SKU, y el cuello
 de botella (censo Enterprise, 6 llamadas/estudio contra 1.000 gratis/mes)
 permite **166 estudios al mes sin factura**. Muy por encima de lo que un solo
 usuario necesita.
 
-> ⚠️ **Compute Route Matrix factura por elemento, no por llamada.** 1 origen ×
-> 24 sondas = 24 elementos. La isócrona es la partida más cara del producto. El
-> medidor cuenta elementos — ver [D-15](docs/DECISIONS.md).
+> ℹ️ **La isócrona usa la Isochrones API**, que devuelve un polígono real
+> consciente de la red viaria — no una aproximación por sondas radiales. Está en
+> **Preview**: gratis hoy, facturable al pasar a GA, y con cobertura por país sin
+> declarar. Se verifica contra RD antes de construir encima. Ver
+> [D-16](docs/DECISIONS.md).
 
 ---
 

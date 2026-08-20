@@ -335,3 +335,53 @@ que **el medidor de coste de E-3 debe contar elementos, no llamadas**.
 Sin esa corrección, la reconciliación del ±20% contra Cloud Billing fallaría por
 un factor 24 en esa partida, y se culparía a la tabla de precios en vez de al
 medidor.
+
+---
+
+## D-16 · Google SÍ tiene Isochrones API — D-6 y D-15 quedan obsoletas — 2026-08-20
+
+**Contexto.** D-6 se escribió sobre la premisa de que *"Google no tiene API de
+isócronas"*, y por eso diseñó una aproximación por abanico radial de 24 sondas
+contra Compute Route Matrix. D-15 corrigió su coste a $0,120 por elemento y la
+declaró la partida más cara del producto.
+
+**La premisa era falsa.** Google publicó una **Isochrones API**, detectada al
+revisar la lista de APIs disponibles en el proyecto de Cloud del dueño.
+
+| | Aproximación de D-6 | Isochrones API |
+|---|---|---|
+| Método | 24 sondas radiales + unión de puntos | Polígono real consciente de la red viaria |
+| Exactitud | Aproximación, etiquetada como tal | Alcanzabilidad verdadera |
+| Coste | $0,120 por isócrona (24 elementos) | **$0,00 durante Preview** |
+| Llamadas | 1 Route Matrix por modo y umbral | 1 `GenerateIsochrone` |
+| Modos | Los de Routes | `DRIVE`, `WALK`, `BICYCLE` |
+| Límites | Los que pusiéramos | 3.600 s en DRIVE · 7.200 s en WALK/BICYCLE |
+
+**Decisión.** Se adopta Isochrones API y se retira el abanico radial. Es
+simultáneamente **más exacta y más barata** — no hay compromiso que evaluar.
+
+**Consecuencias.**
+
+1. **La UI deja de etiquetar la isócrona como aproximación.** Pasa a ser un dato
+   real de red viaria. Esa etiqueta era honesta con el método anterior y sería
+   engañosa con este.
+2. **El coste por estudio baja de ~$0,42 a ~$0,30** mientras dure el Preview.
+3. **E-13 se simplifica mucho.** Desaparece la generación de sondas, la unión de
+   puntos y el manejo del truncamiento por umbral.
+4. **D-14 sigue vigente.** El polígono que devuelve Google se intersecta con
+   geometría censal de la ONE, no con coordenadas de Places.
+
+**Dos riesgos que hay que aceptar explícitamente.**
+
+- **Está en Preview (pre-GA).** Google declara soporte limitado y advierte de
+  cambios incompatibles entre versiones pre-GA. Si rompe, el plan B es volver al
+  método de D-6, que queda documentado y no se borra de este fichero.
+- **Gratis solo durante Preview.** Al pasar a GA se factura por 1.000
+  peticiones, dentro de los planes Essentials y Pro. El medidor de coste debe
+  contemplar esa transición y no asumir $0 para siempre.
+
+**Sin verificar.** La documentación **no declara cobertura por país**. Que
+funcione en República Dominicana es un supuesto, no un hecho — exactamente el
+tipo de supuesto que hundió al proyecto anterior con Overture. **Se verifica con
+una llamada real en E-13 antes de construir nada encima**, y si no cubre RD se
+vuelve a D-6 sin drama.

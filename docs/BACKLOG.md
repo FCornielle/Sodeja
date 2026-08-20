@@ -16,7 +16,7 @@ para empezar.
 | ID | Item | Agente | Estado |
 |---|---|---|---|
 | **E-0** | Scaffold Next.js 15 + TS + Zod + SQLite + Vitest + Playwright; 8 agentes y 4 skills en `.claude/`; `.env.local.example` | — | **hecho** |
-| **E-1** | Habilitar las 8 APIs en Cloud; dos claves con restricciones opuestas; presupuesto y alerta en Cloud Billing; `/api/health/google` | `esodeja-maps` | **bloqueado** — requiere Project ID y claves del dueño |
+| **E-1** | Habilitar las APIs en Cloud; dos claves con restricciones opuestas; presupuesto y alerta en Cloud Billing; `/api/health/google` | `esodeja-maps` | **en curso** — claves configuradas y verificadas 2026-08-20 |
 
 ### E-0 — criterios de aceptación
 
@@ -319,13 +319,27 @@ reporte impreso (E-16). Texto para pegar tal cual:
 
 | ID | Item | Agente | Estado |
 |---|---|---|---|
-| **E-13** | Isócronas aproximadas a pie y en coche (5/10/15 min), abanico radial + Route Matrix, etiquetadas como aproximación | `esodeja-maps` | pendiente |
+| **E-13** | Isócronas reales con **Isochrones API** (`GenerateIsochrone`), modos WALK y DRIVE | `esodeja-maps` | pendiente |
 | **E-14** | Población alcanzable: OCHA COD-AB + Censo ONE 2022 como ficheros estáticos; intersección con Turf | `esodeja-data` | pendiente |
 | **E-15** | Índice de demanda = población / competidores, con niveles de confianza y supresión por cobertura insuficiente | `esodeja-domain` | pendiente |
 
-**E-13:** Google no tiene API de isócronas. Es una aproximación por sondas
-radiales y la UI debe decirlo. **Coste:** 1 llamada Route Matrix Pro por modo y
-umbral ≈ 2 por estudio.
+**E-13 cambia de método (D-16).** Google **sí** tiene Isochrones API desde 2026:
+devuelve un polígono real consciente de la red viaria, no una aproximación. Es
+simultáneamente más exacta y más barata que el abanico radial que este item
+describía antes.
+
+- [ ] **Primer criterio, antes que ningún otro: verificar con una llamada real
+      que Isochrones API cubre República Dominicana.** La documentación **no
+      declara cobertura por país**. Si no cubre RD, se vuelve al método de D-6,
+      que sigue documentado.
+- [ ] La UI **ya no etiqueta la isócrona como aproximación** — esa etiqueta era
+      honesta con el método anterior y sería engañosa con este.
+- [ ] Límites respetados: 3.600 s en `DRIVE`, 7.200 s en `WALK`.
+- [ ] El medidor registra la llamada aunque hoy cueste $0: al pasar a GA
+      empezará a facturar y el histórico debe ser continuo.
+
+**Coste: $0,00 durante Preview.** Riesgo aceptado: es pre-GA, con soporte
+limitado y posibles cambios incompatibles.
 
 **E-14:** el censo ONE 2022 tiene **20,6% de omisión de hogares**, la peor en 20
 años, sesgada hacia Santiago y Santo Domingo. La advertencia se muestra junto al
